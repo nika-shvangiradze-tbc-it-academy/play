@@ -2,6 +2,7 @@ import { config } from 'dotenv';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
+import { parseCorsOrigins } from './cors.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,7 +27,10 @@ const envSchema = z
     RECONNECT_GRACE_MS: z.coerce.number().default(60_000),
     RATE_LIMIT_CREATE_ROOM_PER_MIN: z.coerce.number().default(10),
     RATE_LIMIT_JOIN_ROOM_PER_MIN: z.coerce.number().default(30),
-    CORS_ORIGIN: z.string().default('http://localhost:4200'),
+    /** Preferred: comma-separated browser origins. */
+    CORS_ORIGINS: z.string().optional(),
+    /** Legacy single/csv alias — used only when CORS_ORIGINS is unset. */
+    CORS_ORIGIN: z.string().optional(),
   })
   .superRefine((raw, ctx) => {
     if (!raw.SUPABASE_PUBLISHABLE_KEY && !raw.SUPABASE_ANON_KEY) {
@@ -44,17 +48,24 @@ const envSchema = z
       });
     }
   })
-  .transform((raw) => ({
-    PORT: raw.PORT,
-    NODE_ENV: raw.NODE_ENV,
-    SUPABASE_URL: raw.SUPABASE_URL,
-    SUPABASE_PUBLISHABLE_KEY: (raw.SUPABASE_PUBLISHABLE_KEY ?? raw.SUPABASE_ANON_KEY)!,
-    SUPABASE_SECRET_KEY: (raw.SUPABASE_SECRET_KEY ?? raw.SUPABASE_SERVICE_ROLE_KEY)!,
-    RECONNECT_GRACE_MS: raw.RECONNECT_GRACE_MS,
-    RATE_LIMIT_CREATE_ROOM_PER_MIN: raw.RATE_LIMIT_CREATE_ROOM_PER_MIN,
-    RATE_LIMIT_JOIN_ROOM_PER_MIN: raw.RATE_LIMIT_JOIN_ROOM_PER_MIN,
-    CORS_ORIGIN: raw.CORS_ORIGIN,
-  }));
+  .transform((raw) => {
+    // Prefer CORS_ORIGINS; fall back to legacy CORS_ORIGIN; else localhost-only defaults.
+    const corsRaw =
+      raw.CORS_ORIGINS !== undefined && raw.CORS_ORIGINS.trim() !== ''
+        ? raw.CORS_ORIGINS
+        : raw.CORS_ORIGIN;
+    return {
+      PORT: raw.PORT,
+      NODE_ENV: raw.NODE_ENV,
+      SUPABASE_URL: raw.SUPABASE_URL,
+      SUPABASE_PUBLISHABLE_KEY: (raw.SUPABASE_PUBLISHABLE_KEY ?? raw.SUPABASE_ANON_KEY)!,
+      SUPABASE_SECRET_KEY: (raw.SUPABASE_SECRET_KEY ?? raw.SUPABASE_SERVICE_ROLE_KEY)!,
+      RECONNECT_GRACE_MS: raw.RECONNECT_GRACE_MS,
+      RATE_LIMIT_CREATE_ROOM_PER_MIN: raw.RATE_LIMIT_CREATE_ROOM_PER_MIN,
+      RATE_LIMIT_JOIN_ROOM_PER_MIN: raw.RATE_LIMIT_JOIN_ROOM_PER_MIN,
+      CORS_ORIGINS: parseCorsOrigins(corsRaw),
+    };
+  });
 
 export type ServerEnv = z.output<typeof envSchema>;
 

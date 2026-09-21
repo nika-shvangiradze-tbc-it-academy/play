@@ -4,18 +4,16 @@ import { createServer } from 'node:http';
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { getEnv, isDev } from './config/env.js';
+import { createCorsOptions } from './config/cors.js';
 import { createApiRouter } from './http/api.js';
 import { NardiRoom } from './rooms/NardiRoom.js';
 
 async function main(): Promise<void> {
   const env = getEnv();
   const app = express();
-  app.use(
-    cors({
-      origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
-      credentials: true,
-    }),
-  );
+
+  // CORS must run before routes so preflight OPTIONS and auth errors still get headers.
+  app.use(cors(createCorsOptions(env.CORS_ORIGINS)));
   app.use(express.json({ limit: '32kb' }));
   app.use('/api', createApiRouter());
 
@@ -29,7 +27,7 @@ async function main(): Promise<void> {
   httpServer.listen(env.PORT, () => {
     console.log(`[game-server] listening on :${env.PORT}`);
     if (isDev()) {
-      console.log(`[game-server] CORS origin=${env.CORS_ORIGIN}`);
+      console.log(`[game-server] CORS origins=${env.CORS_ORIGINS.join(',')}`);
     }
   });
 }

@@ -13,7 +13,7 @@
 | `SUPABASE_SECRET_KEY` | Game server only (`sb_secret_...`) |
 | `SUPABASE_URL` | Game server + web |
 | `SUPABASE_PUBLISHABLE_KEY` | Web (public) + optional server (`sb_publishable_...`) |
-| `CORS_ORIGIN` | Game server (exact web origin) |
+| `CORS_ORIGINS` | Game server — comma-separated browser origins, e.g. `https://gartoba.netlify.app,http://localhost:4200` (legacy `CORS_ORIGIN` still accepted) |
 | `NODE_ENV=production` | Game server |
 
 User JWTs are verified via JWKS (`{SUPABASE_URL}/auth/v1/.well-known/jwks.json`, ES256).  
