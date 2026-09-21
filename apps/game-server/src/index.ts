@@ -3,13 +3,14 @@ import cors from 'cors';
 import { createServer } from 'node:http';
 import { Server } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
-import { getEnv, isDev } from './config/env.js';
+import { getEnv, isDev, logSupabaseKeyConfigOnce } from './config/env.js';
 import { createCorsOptions } from './config/cors.js';
 import { createApiRouter } from './http/api.js';
 import { NardiRoom } from './rooms/NardiRoom.js';
 
 async function main(): Promise<void> {
   const env = getEnv();
+  logSupabaseKeyConfigOnce();
   const app = express();
 
   // CORS must run before routes so preflight OPTIONS and auth errors still get headers.

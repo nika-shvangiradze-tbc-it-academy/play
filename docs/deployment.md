@@ -23,10 +23,11 @@ Never ship `SUPABASE_SECRET_KEY` in the Angular bundle.
 
 ## Checklist
 
-- [ ] Apply all `supabase/migrations` to production
+- [ ] Apply all `supabase/migrations` to production (through `20260321000005_ensure_table_grants.sql` — required to avoid `permission denied for table profiles`)
 - [ ] Confirm email auth templates / redirect URLs
 - [ ] Confirm asymmetric JWT signing key (ES256) is active; JWKS returns public keys
 - [ ] Set Angular `environment.ts` production URLs (`https` / `wss`) + publishable key
+- [ ] On Render: `SUPABASE_SECRET_KEY=sb_secret_…` (never the publishable key); confirm logs show `Supabase server key configured: secret`
 - [ ] Enable WSS termination (TLS) in front of Colyseus
 - [ ] Configure CORS to the real web origin only
 - [ ] Process manager / health check on `GET /api/health`

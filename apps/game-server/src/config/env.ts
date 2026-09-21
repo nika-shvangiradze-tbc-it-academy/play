@@ -11,6 +11,19 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 config({ path: resolve(__dirname, '../../../../.env') });
 config({ path: resolve(__dirname, '../../.env') });
 
+/** Classify a server key without logging its value. */
+export function describeSupabaseServerKey(key: string): string {
+  if (key.startsWith('sb_secret_')) return 'secret';
+  if (key.startsWith('eyJ')) return 'legacy_service_role_jwt';
+  if (key.startsWith('sb_publishable_')) return 'publishable_MISCONFIGURED';
+  if (key.startsWith('sb_')) return 'unknown_sb_prefix';
+  return 'unrecognized';
+}
+
+function looksLikeSecretServerKey(key: string): boolean {
+  return key.startsWith('sb_secret_') || key.startsWith('eyJ');
+}
+
 /**
  * Prefer modern Supabase API key names; accept legacy aliases for migration.
  * Never use SUPABASE_JWT_SECRET — user JWTs are verified via JWKS (ES256).
@@ -45,6 +58,38 @@ const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['SUPABASE_SECRET_KEY'],
         message: 'Required (or set legacy SUPABASE_SERVICE_ROLE_KEY)',
+      });
+    }
+
+    const secret = raw.SUPABASE_SECRET_KEY ?? raw.SUPABASE_SERVICE_ROLE_KEY;
+    const publishable = raw.SUPABASE_PUBLISHABLE_KEY ?? raw.SUPABASE_ANON_KEY;
+
+    if (secret?.startsWith('sb_publishable_')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SUPABASE_SECRET_KEY'],
+        message: 'Must be sb_secret_… (or legacy service_role JWT), not a publishable key',
+      });
+    }
+    if (publishable?.startsWith('sb_secret_')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SUPABASE_PUBLISHABLE_KEY'],
+        message: 'Must be sb_publishable_… (or legacy anon JWT), not a secret key',
+      });
+    }
+    if (secret && publishable && secret === publishable) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SUPABASE_SECRET_KEY'],
+        message: 'Must differ from the publishable/anon key',
+      });
+    }
+    if (secret && !looksLikeSecretServerKey(secret) && secret.startsWith('sb_')) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['SUPABASE_SECRET_KEY'],
+        message: 'Unrecognized key format — expected sb_secret_… or legacy service_role JWT',
       });
     }
   })
@@ -91,4 +136,12 @@ export function resetEnvCache(): void {
 
 export function isDev(): boolean {
   return getEnv().NODE_ENV === 'development';
+}
+
+/** Log-safe summary of which server key kind is configured (never the value). */
+export function logSupabaseKeyConfigOnce(): void {
+  const env = getEnv();
+  console.log(
+    `[config] Supabase server key configured: ${describeSupabaseServerKey(env.SUPABASE_SECRET_KEY)}`,
+  );
 }
