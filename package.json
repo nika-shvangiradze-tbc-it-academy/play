@@ -25,7 +25,7 @@
     "concurrently": "^9.1.2"
   },
   "engines": {
-    "node": "20.x"
+    "node": "22.x"
   },
   "dependencies": {
     "typescript": "~5.7.3"
