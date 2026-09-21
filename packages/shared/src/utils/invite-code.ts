@@ -10,14 +10,32 @@ const ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const CODE_LENGTH = 6;
 const MAX_ATTEMPTS = 32;
 
+/**
+ * Minimal Web Crypto surface (browsers + Node 20+).
+ * Shared tsconfig uses lib ES2022 only (no DOM), so `globalThis.crypto`
+ * is not declared — narrow it here instead of pulling in full DOM types.
+ */
+interface WebCryptoRandom {
+  getRandomValues<T extends ArrayBufferView>(array: T): T;
+}
+
+type GlobalWithCrypto = typeof globalThis & {
+  readonly crypto?: WebCryptoRandom;
+};
+
+function getWebCrypto(): WebCryptoRandom {
+  const cryptoObj = (globalThis as GlobalWithCrypto).crypto;
+  if (!cryptoObj?.getRandomValues) {
+    throw new Error('Secure random generator unavailable');
+  }
+  return cryptoObj;
+}
+
 function secureRandomInt(maxExclusive: number): number {
   if (maxExclusive <= 0) {
     throw new Error('maxExclusive must be positive');
   }
-  const cryptoObj = globalThis.crypto;
-  if (!cryptoObj?.getRandomValues) {
-    throw new Error('Secure random generator unavailable');
-  }
+  const cryptoObj = getWebCrypto();
   // Rejection sampling to avoid modulo bias
   const limit = Math.floor(0x100000000 / maxExclusive) * maxExclusive;
   const buf = new Uint32Array(1);
