@@ -53,11 +53,16 @@ export class ColyseusService {
   private readonly auth = inject(AuthService);
   private client = new Client(environment.gameServerWsUrl);
   private room: Room | null = null;
+  /** Prevents overlapping joinById / leave races that close an in-flight socket. */
+  private joinEpoch = 0;
+  private joinInFlight: Promise<void> | null = null;
 
   readonly connected = signal(false);
   readonly connecting = signal(false);
   readonly lastError = signal<string | null>(null);
   readonly view = signal<LiveRoomView | null>(null);
+  /** Test/diagnostic: how many joinById attempts were started. */
+  readonly joinAttempts = signal(0);
 
   readonly mySeat = computed(() => {
     const uid = this.auth.user()?.id;
@@ -77,10 +82,31 @@ export class ColyseusService {
     if (!colyseusRoomId) {
       throw new Error('Missing Colyseus room id from server');
     }
+
+    // Already on this room — do not tear down / rejoin (avoids CLOSING race).
+    if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
+      console.info('[colyseus] joinById skipped — already connected', colyseusRoomId);
+      return;
+    }
+
+    if (this.joinInFlight) {
+      console.info('[colyseus] joinById waiting for in-flight join');
+      await this.joinInFlight;
+      if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
+        return;
+      }
+    }
+
     console.info('[colyseus] joinById', colyseusRoomId, 'via', environment.gameServerWsUrl);
-    await this.connect(async (token) =>
+    this.joinAttempts.update((n) => n + 1);
+
+    const run = this.connect(async (token) =>
       this.client.joinById(colyseusRoomId, { accessToken: token }),
     );
+    this.joinInFlight = run.finally(() => {
+      this.joinInFlight = null;
+    });
+    await this.joinInFlight;
   }
 
   private async withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -107,11 +133,23 @@ export class ColyseusService {
     const token = this.auth.accessToken();
     if (!token) throw new Error('Not authenticated');
 
+    const epoch = ++this.joinEpoch;
     this.connecting.set(true);
     this.lastError.set(null);
     try {
-      await this.leave();
+      await this.detachCurrentRoom(/* consented */ false);
+      if (epoch !== this.joinEpoch) {
+        throw new Error('Join superseded');
+      }
       const room = await this.withTimeout(factory(token), 30_000, 'WebSocket join');
+      if (epoch !== this.joinEpoch) {
+        try {
+          await room.leave(false);
+        } catch {
+          /* ignore */
+        }
+        throw new Error('Join superseded');
+      }
       this.room = room;
       this.connected.set(true);
       this.bindRoom(room);
@@ -123,25 +161,35 @@ export class ColyseusService {
       this.connected.set(false);
       throw err instanceof Error ? err : new Error(message);
     } finally {
-      this.connecting.set(false);
+      if (epoch === this.joinEpoch) {
+        this.connecting.set(false);
+      }
     }
   }
 
   private bindRoom(room: Room): void {
-    room.onStateChange(() => this.syncFromState(room));
+    room.onStateChange(() => {
+      if (this.room !== room) return;
+      this.syncFromState(room);
+    });
     room.onError((code, message) => {
+      if (this.room !== room) return;
       this.lastError.set(message ?? `Error ${code}`);
     });
     room.onLeave((code) => {
+      if (this.room !== room) return;
       this.connected.set(false);
+      this.room = null;
       if (code !== 1000) {
         this.lastError.set('Disconnected from room');
       }
     });
     room.onMessage(ServerEvent.ACTION_REJECTED, (payload: { message?: string }) => {
+      if (this.room !== room) return;
       this.lastError.set(payload.message ?? 'Action rejected');
     });
     room.onMessage(ServerEvent.ERROR, (payload: { message?: string }) => {
+      if (this.room !== room) return;
       this.lastError.set(payload.message ?? 'Server error');
     });
   }
@@ -227,7 +275,11 @@ export class ColyseusService {
   sendIntent(message: ClientMessage): void {
     if (!this.room) return;
     this.lastError.set(null);
-    this.room.send('intent', message);
+    try {
+      this.room.send('intent', message);
+    } catch (err) {
+      console.warn('[colyseus] send failed (socket closing?)', err);
+    }
   }
 
   ready(): void {
@@ -251,16 +303,28 @@ export class ColyseusService {
     this.sendIntent({ type: ClientIntent.LEAVE_ROOM });
   }
 
-  async leave(): Promise<void> {
-    if (this.room) {
-      try {
-        await this.room.leave(true);
-      } catch {
-        /* ignore */
-      }
-      this.room = null;
-    }
+  /**
+   * Drop the current room without racing a new join.
+   * Use consented=true only for explicit user Leave (drops DB membership on server).
+   */
+  private async detachCurrentRoom(consented: boolean): Promise<void> {
+    const room = this.room;
+    this.room = null;
     this.connected.set(false);
+    if (!room) {
+      this.view.set(null);
+      return;
+    }
+    try {
+      await room.leave(consented);
+    } catch {
+      /* already CLOSING/CLOSED — ignore */
+    }
     this.view.set(null);
+  }
+
+  async leave(): Promise<void> {
+    this.joinEpoch += 1;
+    await this.detachCurrentRoom(true);
   }
 }

@@ -12,9 +12,11 @@ import { authenticateToken, AuthError } from '../auth/verify-token.js';
 import {
   abandonOrphanRoom,
   createGameRoom,
+  evaluateJoinOccupancy,
+  getRoomOccupancy,
   lookupRoomByInviteCode,
-  reserveSeat,
   setColyseusRoomId,
+  shortUserId,
 } from '../db/rooms.js';
 import { getEnv } from '../config/env.js';
 import { RateLimiter } from '../security/rate-limiter.js';
@@ -195,7 +197,14 @@ export function createApiRouter(): Router {
         'createGameRoom',
       );
       dbRoomId = created.roomId;
-      console.log('[rooms:create] database room created');
+      const occupancy = await withTimeout(
+        getRoomOccupancy(created.roomId),
+        DB_TIMEOUT_MS(),
+        'getRoomOccupancy',
+      );
+      console.log(
+        `[rooms:create] database room created members=${occupancy.totalRows} distinct=${occupancy.distinctCount}`,
+      );
 
       const metadata: RoomMetadata = {
         dbRoomId: created.roomId,
@@ -211,7 +220,13 @@ export function createApiRouter(): Router {
         COLYSEUS_TIMEOUT_MS(),
         'matchMaker.createRoom',
       );
-      console.log('[rooms:create] Colyseus room created');
+      const live = matchMaker.getRoomById(room.roomId) as
+        | { clients?: { length: number } }
+        | undefined;
+      const clientCount = live?.clients?.length ?? 0;
+      console.log(
+        `[rooms:create] Colyseus room created clients=${clientCount}/${created.maxPlayers}`,
+      );
 
       await withTimeout(
         setColyseusRoomId(created.roomId, room.roomId),
@@ -310,7 +325,10 @@ export function createApiRouter(): Router {
     }
   });
 
-  /** Reserve seat then return Colyseus room id for join. */
+  /** Validate invite + occupancy, then return Colyseus room id for joinById.
+   * Membership is NOT inserted here — Colyseus onJoin is authoritative for guests
+   * so a failed WebSocket join cannot permanently consume a seat.
+   */
   router.post('/rooms/join', requireAuth, async (req, res) => {
     try {
       if (!joinRoomLimiter.tryRemoveToken(`join:${clientKey(req)}`)) {
@@ -319,6 +337,7 @@ export function createApiRouter(): Router {
       }
 
       const code = normalizeInviteCode(String(req.body?.inviteCode ?? ''));
+      console.log(`[rooms:join] invite=${code || '(empty)'}`);
       if (!isValidInviteCodeFormat(code)) {
         res.status(400).json({ code: ErrorCode.INVALID_INVITE_CODE, message: 'Invalid invite code' });
         return;
@@ -330,11 +349,35 @@ export function createApiRouter(): Router {
         return;
       }
 
+      const profile = (req as AuthedRequest).profile;
+      const occupancyCheck = evaluateJoinOccupancy(
+        room.memberIds,
+        room.maxPlayers,
+        profile.userId,
+      );
+
+      console.log(
+        `[rooms:join] db members=${room.seatsTaken} distinct=${occupancyCheck.distinctCount}`,
+      );
+      console.log(
+        `[rooms:join] requesting user alreadyMember=${occupancyCheck.alreadyMember} user=${shortUserId(profile.userId)}`,
+      );
+
       if (
         room.status === RoomStatus.PLAYING ||
         room.status === RoomStatus.STARTING
       ) {
-        // Allow only if already a participant (reconnect path uses Colyseus directly)
+        if (occupancyCheck.alreadyMember && room.colyseusRoomId) {
+          // Reconnect path for a seated player after match start.
+          res.json({
+            roomId: room.id,
+            inviteCode: room.inviteCode,
+            gameType: room.gameType,
+            colyseusRoomId: room.colyseusRoomId,
+            maxPlayers: room.maxPlayers,
+          });
+          return;
+        }
         res.status(409).json({
           code: ErrorCode.GAME_ALREADY_STARTED,
           message: 'Game already started',
@@ -352,7 +395,7 @@ export function createApiRouter(): Router {
         return;
       }
 
-      if (room.seatsTaken >= room.maxPlayers) {
+      if (occupancyCheck.isFull) {
         res.status(409).json({ code: ErrorCode.ROOM_FULL, message: 'Room is full' });
         return;
       }
@@ -362,20 +405,21 @@ export function createApiRouter(): Router {
         return;
       }
 
-      const profile = (req as AuthedRequest).profile;
-      const seatNumber = room.seatsTaken; // host is 0; next free approximate — Colyseus assigns exactly
+      const live = matchMaker.getRoomById(room.colyseusRoomId) as
+        | { clients?: { length: number }; hasReachedMaxClients?: () => boolean }
+        | undefined;
+      const clientCount = live?.clients?.length ?? 0;
+      console.log(
+        `[rooms:join] colyseus room=${room.colyseusRoomId} clients=${clientCount}/${room.maxPlayers}`,
+      );
 
-      try {
-        await reserveSeat(room.id, profile.userId, seatNumber);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : '';
-        if (msg === 'SEAT_TAKEN') {
-          res.status(409).json({ code: ErrorCode.SEAT_TAKEN, message: 'Seat taken' });
-          return;
-        }
-        throw err;
+      // Soft check against live Colyseus capacity (does not insert DB rows).
+      if (!occupancyCheck.alreadyMember && live?.hasReachedMaxClients?.()) {
+        res.status(409).json({ code: ErrorCode.ROOM_FULL, message: 'Room is full' });
+        return;
       }
 
+      console.log('[rooms:join] reservation created');
       res.json({
         roomId: room.id,
         inviteCode: room.inviteCode,

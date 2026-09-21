@@ -60,7 +60,7 @@ export class RoomPage implements OnInit, OnDestroy {
   }
 
   async leave(): Promise<void> {
-    this.colyseus.leaveRoom();
+    // Single leave path — do not also send LEAVE_ROOM (that double-closes the socket).
     await this.colyseus.leave();
     await this.router.navigateByUrl('/lobby');
   }

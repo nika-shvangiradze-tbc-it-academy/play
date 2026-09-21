@@ -43,18 +43,27 @@ describe('POST /api/rooms + Colyseus bootstrap integration', () => {
         }),
       };
     });
-    vi.doMock('../db/rooms.js', () => ({
-      createGameRoom: vi.fn().mockResolvedValue({
-        roomId: 'db-room-int',
-        inviteCode: 'ZZZZZZ',
-        gameType: GameType.NARDI,
-        maxPlayers: 2,
-      }),
-      setColyseusRoomId: vi.fn().mockResolvedValue(undefined),
-      abandonOrphanRoom: vi.fn().mockResolvedValue(undefined),
-      lookupRoomByInviteCode: vi.fn(),
-      reserveSeat: vi.fn(),
-    }));
+    vi.doMock('../db/rooms.js', async () => {
+      const actual = await vi.importActual<typeof import('../db/rooms.js')>('../db/rooms.js');
+      return {
+        ...actual,
+        createGameRoom: vi.fn().mockResolvedValue({
+          roomId: 'db-room-int',
+          inviteCode: 'ZZZZZZ',
+          gameType: GameType.NARDI,
+          maxPlayers: 2,
+        }),
+        setColyseusRoomId: vi.fn().mockResolvedValue(undefined),
+        abandonOrphanRoom: vi.fn().mockResolvedValue(undefined),
+        getRoomOccupancy: vi.fn().mockResolvedValue({
+          memberIds: ['user-1'],
+          totalRows: 1,
+          distinctCount: 1,
+        }),
+        lookupRoomByInviteCode: vi.fn(),
+        reserveSeat: vi.fn(),
+      };
+    });
 
     const { createApiRouter, resetApiRateLimitersForTests } = await import('./api.js');
     resetApiRateLimitersForTests();

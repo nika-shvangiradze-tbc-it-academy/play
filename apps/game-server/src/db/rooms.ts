@@ -15,6 +15,34 @@ export interface CreatedRoom {
   maxPlayers: number;
 }
 
+export interface RoomOccupancy {
+  /** Active member user ids (left_at IS NULL), de-duplicated. */
+  memberIds: string[];
+  /** Raw active row count (should match distinct unless integrity is broken). */
+  totalRows: number;
+  distinctCount: number;
+}
+
+export function shortUserId(userId: string): string {
+  return userId.length <= 8 ? userId : userId.slice(0, 8);
+}
+
+/**
+ * Occupancy for join checks: distinct active user ids only.
+ * Never treat duplicate rows for the same user as two seats.
+ */
+export function evaluateJoinOccupancy(
+  memberIds: string[],
+  maxPlayers: number,
+  requestingUserId: string,
+): { alreadyMember: boolean; distinctCount: number; isFull: boolean } {
+  const unique = [...new Set(memberIds)];
+  const alreadyMember = unique.includes(requestingUserId);
+  const distinctCount = unique.length;
+  const isFull = !alreadyMember && distinctCount >= maxPlayers;
+  return { alreadyMember, distinctCount, isFull };
+}
+
 export async function createGameRoom(
   hostUserId: string,
   gameType: GameType,
@@ -47,6 +75,7 @@ export async function createGameRoom(
     throw new Error(`Failed to create room: ${error?.message ?? 'unknown'}`);
   }
 
+  // Host claims seat 0 in DB. Colyseus onJoin must not create a second row (idempotent upsert).
   const { error: seatError } = await supabase.from('room_players').insert({
     room_id: room.id,
     user_id: hostUserId,
@@ -81,7 +110,6 @@ export async function setColyseusRoomId(roomId: string, colyseusRoomId: string):
 /**
  * Best-effort cleanup when Colyseus room creation fails after the DB row exists.
  * Deletes the incomplete room (and cascaded seats) so invite codes are not left half-created.
- * Avoids setting finished_at — schema requires started_at first.
  */
 export async function abandonOrphanRoom(roomId: string): Promise<void> {
   const supabase = getAdminClient();
@@ -92,6 +120,27 @@ export async function abandonOrphanRoom(roomId: string): Promise<void> {
   }
 }
 
+export async function getRoomOccupancy(roomId: string): Promise<RoomOccupancy> {
+  const supabase = getAdminClient();
+  const { data, error } = await supabase
+    .from('room_players')
+    .select('user_id')
+    .eq('room_id', roomId)
+    .is('left_at', null);
+
+  if (error) {
+    throw new Error(`Occupancy lookup failed: ${error.message}`);
+  }
+
+  const rows = data ?? [];
+  const memberIds = [...new Set(rows.map((r) => r.user_id as string))];
+  return {
+    memberIds,
+    totalRows: rows.length,
+    distinctCount: memberIds.length,
+  };
+}
+
 export interface RoomLookup {
   id: string;
   inviteCode: string;
@@ -100,7 +149,9 @@ export interface RoomLookup {
   maxPlayers: number;
   hostUserId: string;
   colyseusRoomId: string | null;
+  /** Distinct active members — authoritative for fullness. */
   seatsTaken: number;
+  memberIds: string[];
 }
 
 export async function lookupRoomByInviteCode(inviteCode: string): Promise<RoomLookup | null> {
@@ -116,11 +167,7 @@ export async function lookupRoomByInviteCode(inviteCode: string): Promise<RoomLo
   }
   if (!room) return null;
 
-  const { count } = await supabase
-    .from('room_players')
-    .select('id', { count: 'exact', head: true })
-    .eq('room_id', room.id)
-    .is('left_at', null);
+  const occupancy = await getRoomOccupancy(room.id as string);
 
   return {
     id: room.id as string,
@@ -130,30 +177,52 @@ export async function lookupRoomByInviteCode(inviteCode: string): Promise<RoomLo
     maxPlayers: room.max_players as number,
     hostUserId: room.host_user_id as string,
     colyseusRoomId: (room.colyseus_room_id as string | null) ?? null,
-    seatsTaken: count ?? 0,
+    seatsTaken: occupancy.distinctCount,
+    memberIds: occupancy.memberIds,
   };
 }
 
-export async function reserveSeat(
+/**
+ * Idempotent membership upsert — Colyseus onJoin is the authority for guests.
+ * Safe to call on every join/reconnect; never creates duplicate active rows.
+ */
+export async function ensureRoomMembership(
   roomId: string,
   userId: string,
   seatNumber: number,
-): Promise<void> {
+): Promise<'created' | 'reseat' | 'existing'> {
   const supabase = getAdminClient();
 
-  // Rejoin: clear left_at if previously left same room
-  const { data: existing } = await supabase
+  const { data: active, error: activeError } = await supabase
     .from('room_players')
-    .select('id, left_at, seat_number')
+    .select('id, seat_number')
     .eq('room_id', roomId)
     .eq('user_id', userId)
+    .is('left_at', null)
     .maybeSingle();
 
-  if (existing && existing.left_at === null) {
-    return; // already seated
+  if (activeError) {
+    throw new Error(`Failed to load membership: ${activeError.message}`);
+  }
+  if (active) {
+    return 'existing';
   }
 
-  if (existing) {
+  const { data: prior, error: priorError } = await supabase
+    .from('room_players')
+    .select('id')
+    .eq('room_id', roomId)
+    .eq('user_id', userId)
+    .not('left_at', 'is', null)
+    .order('joined_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (priorError) {
+    throw new Error(`Failed to load prior membership: ${priorError.message}`);
+  }
+
+  if (prior) {
     const { error } = await supabase
       .from('room_players')
       .update({
@@ -162,9 +231,9 @@ export async function reserveSeat(
         seat_number: seatNumber,
         joined_at: new Date().toISOString(),
       })
-      .eq('id', existing.id);
+      .eq('id', prior.id);
     if (error) throw new Error(`Failed to reseat player: ${error.message}`);
-    return;
+    return 'reseat';
   }
 
   const { error } = await supabase.from('room_players').insert({
@@ -176,9 +245,25 @@ export async function reserveSeat(
 
   if (error) {
     if (error.code === '23505') {
-      throw new Error('SEAT_TAKEN');
+      return 'existing';
     }
-    throw new Error(`Failed to reserve seat: ${error.message}`);
+    throw new Error(`Failed to ensure membership: ${error.message}`);
+  }
+  return 'created';
+}
+
+/**
+ * @deprecated Prefer ensureRoomMembership from Colyseus onJoin.
+ * Kept for tests that simulate the old HTTP pre-reserve path.
+ */
+export async function reserveSeat(
+  roomId: string,
+  userId: string,
+  seatNumber: number,
+): Promise<void> {
+  const result = await ensureRoomMembership(roomId, userId, seatNumber);
+  if (result === 'existing' || result === 'reseat' || result === 'created') {
+    return;
   }
 }
 
@@ -237,7 +322,6 @@ export async function createMatchRecord(
     .single();
 
   if (error || !match) {
-    // Unique active match — fetch existing (idempotent start)
     if (error?.code === '23505') {
       const { data: existing } = await supabase
         .from('matches')

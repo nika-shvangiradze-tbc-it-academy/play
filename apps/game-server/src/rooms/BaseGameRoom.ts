@@ -13,8 +13,10 @@ import { authenticateToken, AuthError, type AuthProfile } from '../auth/verify-t
 import {
   createMatchRecord,
   completeMatchIdempotent,
+  ensureRoomMembership,
   markPlayerLeft,
   setPlayerReady,
+  shortUserId,
   updateRoomStatus,
 } from '../db/rooms.js';
 import { getEnv, isDev } from '../config/env.js';
@@ -57,11 +59,12 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     this.state.hostUserId = options.hostUserId;
     this.state.maxPlayers = options.maxPlayers;
     this.state.phase = RoomPhase.WAITING;
+    // Exactly catalog max (Nardi = 2). matchMaker.createRoom does not consume a client slot.
     this.maxClients = options.maxPlayers;
     this.autoDispose = true;
 
-    // Allow reconnection within grace period
-    this.setSeatReservationTime(60);
+    // Short reservation window so abandoned join attempts do not lock the 2nd seat.
+    this.setSeatReservationTime(20);
 
     this.onMessage('intent', (client, message: ClientMessage) => {
       void this.handleIntent(client, message);
@@ -109,7 +112,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     const existingSeat = this.findSeatByUser(auth.userId);
 
     if (existingSeat) {
-      // Reconnect
+      // Reconnect — same user, same seat (never a second Colyseus slot).
       this.clearReconnectTimer(auth.userId);
       existingSeat.connected = true;
       existingSeat.reconnecting = false;
@@ -126,15 +129,17 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       });
       this.userToSession.set(auth.userId, client.sessionId);
 
+      await ensureRoomMembership(this.state.dbRoomId, auth.userId, existingSeat.seatNumber);
+
       this.broadcast(ServerEvent.PLAYER_RECONNECTED, {
         type: ServerEvent.PLAYER_RECONNECTED,
         userId: auth.userId,
         seatNumber: existingSeat.seatNumber,
       });
 
-      if (isDev()) {
-        console.log(`[room] reconnect ${auth.username} seat=${existingSeat.seatNumber}`);
-      }
+      console.log(
+        `[nardi:onJoin] user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=true`,
+      );
       return;
     }
 
@@ -142,6 +147,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       throw new AuthError(ErrorCode.GAME_ALREADY_STARTED, 'Game already started');
     }
 
+    // Distinct users in schema seats — same account cannot take two seats.
     if (this.state.seats.size >= this.state.maxPlayers) {
       throw new AuthError(ErrorCode.ROOM_FULL, 'Room is full');
     }
@@ -163,9 +169,12 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     });
     this.userToSession.set(auth.userId, client.sessionId);
 
-    if (isDev()) {
-      console.log(`[room] join ${auth.username} seat=${seatNumber}`);
-    }
+    // Authoritative membership for guests (host already inserted on HTTP create — idempotent).
+    await ensureRoomMembership(this.state.dbRoomId, auth.userId, seatNumber);
+
+    console.log(
+      `[nardi:onJoin] user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=false`,
+    );
   }
 
   override async onLeave(client: Client, consented: boolean): Promise<void> {
@@ -175,19 +184,29 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     const seat = this.state.seats.get(String(session.seatNumber));
     if (!seat) return;
 
-    // During waiting lobby, consented leave frees the seat
-    if (!this.matchStarted && (consented || this.state.phase === RoomPhase.WAITING)) {
+    console.log(
+      `[nardi:onLeave] user=${shortUserId(session.userId)} clients=${Math.max(0, this.clients.length - 1)}/${this.maxClients} consented=${consented}`,
+    );
+
+    /**
+     * Waiting lobby: free the Colyseus client slot immediately.
+     * Do NOT call allowReconnection here — a reserved reconnect seat would count toward
+     * maxClients and falsely lock a 2-player room (1 connected + 1 reservation = full).
+     *
+     * Consented leave drops DB membership. Accidental disconnect keeps DB claim so the
+     * same user can rejoin without permanently blocking the invitee.
+     */
+    if (!this.matchStarted && this.state.phase === RoomPhase.WAITING) {
+      this.state.seats.delete(String(session.seatNumber));
+      this.sessions.delete(client.sessionId);
+      this.userToSession.delete(session.userId);
       if (consented) {
-        this.state.seats.delete(String(session.seatNumber));
-        this.sessions.delete(client.sessionId);
-        this.userToSession.delete(session.userId);
         await markPlayerLeft(this.state.dbRoomId, session.userId);
-        if (isDev()) console.log(`[room] leave ${session.username}`);
-        return;
       }
+      return;
     }
 
-    // In-match or accidental disconnect — grace period
+    // In-match disconnect — grace period reconnection
     const grace = getEnv().RECONNECT_GRACE_MS;
     seat.connected = false;
     seat.reconnecting = true;
@@ -201,11 +220,9 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
 
     try {
       await this.allowReconnection(client, grace / 1000);
-      // Reconnected — onJoin handles state
       seat.connected = true;
       seat.reconnecting = false;
     } catch {
-      // Abandonment
       seat.reconnecting = false;
       await this.handleAbandonment(session.userId, session.seatNumber);
     }

@@ -12,6 +12,7 @@ const MatchMakerState = {
 const handleCreateRoom = vi.fn();
 const createRoom = vi.fn();
 const getHandler = vi.fn(() => ({}));
+const getRoomById = vi.fn();
 
 vi.mock('@colyseus/core', () => ({
   matchMaker: {
@@ -21,6 +22,7 @@ vi.mock('@colyseus/core', () => ({
     getHandler,
     handleCreateRoom,
     createRoom,
+    getRoomById,
   },
 }));
 
@@ -38,14 +40,20 @@ vi.mock('../auth/verify-token.js', async () => {
 const createGameRoom = vi.fn();
 const setColyseusRoomId = vi.fn();
 const abandonOrphanRoom = vi.fn();
+const getRoomOccupancy = vi.fn();
 
-vi.mock('../db/rooms.js', () => ({
-  createGameRoom,
-  setColyseusRoomId,
-  abandonOrphanRoom,
-  lookupRoomByInviteCode: vi.fn(),
-  reserveSeat: vi.fn(),
-}));
+vi.mock('../db/rooms.js', async () => {
+  const actual = await vi.importActual<typeof import('../db/rooms.js')>('../db/rooms.js');
+  return {
+    ...actual,
+    createGameRoom,
+    setColyseusRoomId,
+    abandonOrphanRoom,
+    getRoomOccupancy,
+    lookupRoomByInviteCode: vi.fn(),
+    reserveSeat: vi.fn(),
+  };
+});
 
 describe('POST /api/rooms bounded response', () => {
   beforeEach(() => {
@@ -62,10 +70,18 @@ describe('POST /api/rooms bounded response', () => {
     createGameRoom.mockReset();
     setColyseusRoomId.mockReset();
     abandonOrphanRoom.mockReset();
+    getRoomOccupancy.mockReset();
     handleCreateRoom.mockReset();
     createRoom.mockReset();
     getHandler.mockReset();
+    getRoomById.mockReset();
     getHandler.mockReturnValue({});
+    getRoomById.mockReturnValue({ clients: [] });
+    getRoomOccupancy.mockResolvedValue({
+      memberIds: ['user-1'],
+      totalRows: 1,
+      distinctCount: 1,
+    });
 
     authenticateToken.mockResolvedValue({
       userId: 'user-1',
