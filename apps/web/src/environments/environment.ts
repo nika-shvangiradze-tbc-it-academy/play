@@ -1,8 +1,8 @@
 export const environment = {
   production: true,
-  supabaseUrl: 'YOUR_SUPABASE_URL',
+  supabaseUrl: 'https://ktutdqrxeauxpeuocpyy.supabase.co',
   // Publishable key only (sb_publishable_...) — never the secret key
-  supabaseAnonKey: 'YOUR_SUPABASE_PUBLISHABLE_KEY',
+  supabaseAnonKey: 'sb_publishable_V4M1CYcYqorxeHpiH1C5UA_RNDPS-Eq',
   gameServerHttpUrl: 'https://YOUR_GAME_SERVER',
   gameServerWsUrl: 'wss://YOUR_GAME_SERVER',
   gameServerUrl: 'wss://YOUR_GAME_SERVER',
