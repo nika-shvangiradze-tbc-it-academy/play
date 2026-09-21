@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { GAME_CATALOG, GameType, normalizeInviteCode } from '@georgian-games/shared';
 import { GameApiService } from '../../core/game/game-api.service';
-import { ColyseusService } from '../../core/game/colyseus.service';
+import { GameSessionService } from '../../core/game/game-session.service';
 import { environment } from '../../../environments/environment';
 
 @Component({
@@ -15,7 +15,7 @@ import { environment } from '../../../environments/environment';
 })
 export class LobbyPage {
   private readonly api = inject(GameApiService);
-  private readonly colyseus = inject(ColyseusService);
+  private readonly session = inject(GameSessionService);
   private readonly router = inject(Router);
 
   readonly games = GAME_CATALOG;
@@ -25,6 +25,7 @@ export class LobbyPage {
   readonly error = signal<string | null>(null);
   readonly busy = signal(false);
   readonly nardiMode = signal<'menu' | 'create-join'>('menu');
+  private createInFlight = false;
 
   selectNardi(): void {
     this.nardiMode.set('create-join');
@@ -36,6 +37,8 @@ export class LobbyPage {
   }
 
   async createTable(): Promise<void> {
+    if (this.createInFlight || this.busy()) return;
+    this.createInFlight = true;
     this.busy.set(true);
     this.error.set(null);
     try {
@@ -48,19 +51,22 @@ export class LobbyPage {
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
         throw new Error('Server created the table but returned no seat reservation');
       }
-      console.info(
-        '[client:create] attempting joinById=',
-        room.reservation.room.roomId,
-        'session',
-        room.reservation.sessionId,
-      );
-      await this.colyseus.consumeReservation(room.reservation);
+      await this.session.enterWithReservation(room.reservation, {
+        dbRoomId: room.roomId,
+        inviteCode: room.inviteCode,
+        gameType: room.gameType,
+        role: 'host',
+      });
+      if (!this.session.socketOpen()) {
+        throw new Error('Connected to the table but the WebSocket closed immediately');
+      }
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[lobby] createTable failed', err);
       this.error.set(err instanceof Error ? err.message : 'Could not create table');
     } finally {
       this.busy.set(false);
+      this.createInFlight = false;
     }
   }
 
@@ -70,6 +76,8 @@ export class LobbyPage {
       this.error.set('Enter an invite code');
       return;
     }
+    if (this.createInFlight || this.busy()) return;
+    this.createInFlight = true;
     this.busy.set(true);
     this.error.set(null);
     try {
@@ -78,19 +86,22 @@ export class LobbyPage {
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
         throw new Error('Server accepted the join but returned no seat reservation');
       }
-      console.info(
-        '[client:create] attempting joinById=',
-        room.reservation.room.roomId,
-        'session',
-        room.reservation.sessionId,
-      );
-      await this.colyseus.consumeReservation(room.reservation);
+      await this.session.enterWithReservation(room.reservation, {
+        dbRoomId: room.roomId,
+        inviteCode: room.inviteCode,
+        gameType: room.gameType,
+        role: 'guest',
+      });
+      if (!this.session.socketOpen()) {
+        throw new Error('Joined the table but the WebSocket closed immediately');
+      }
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[lobby] joinTable failed', err);
       this.error.set(err instanceof Error ? err.message : 'Could not join table');
     } finally {
       this.busy.set(false);
+      this.createInFlight = false;
     }
   }
 }

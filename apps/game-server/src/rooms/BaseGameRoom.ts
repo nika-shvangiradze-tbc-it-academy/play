@@ -97,10 +97,14 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
 
   override async onAuth(client: Client, options: { accessToken?: string }): Promise<AuthProfile> {
     try {
-      if (!options?.accessToken) {
+      const hasToken = typeof options?.accessToken === 'string' && options.accessToken.length > 0;
+      console.log(
+        `[nardi:onAuth] roomId=${this.roomId} session=${client.sessionId?.slice(0, 8) ?? '?'} hasToken=${hasToken}`,
+      );
+      if (!hasToken) {
         throw new AuthError(ErrorCode.UNAUTHENTICATED, 'Missing access token');
       }
-      const profile = await authenticateToken(options.accessToken);
+      const profile = await authenticateToken(options.accessToken!);
 
       // Reject if another live session for same user (unless reconnecting)
       const existingSessionId = this.userToSession.get(profile.userId);
@@ -115,9 +119,15 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
         }
       }
 
+      console.log(
+        `[nardi:onAuth] ok user=${shortUserId(profile.userId)} roomId=${this.roomId}`,
+      );
       return profile;
     } catch (err) {
       if (err instanceof AuthError) {
+        console.warn(
+          `[nardi:onAuth] rejected roomId=${this.roomId} code=${err.code} message=${err.message}`,
+        );
         throw err;
       }
       console.error('[auth] unexpected', err);
@@ -158,7 +168,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       });
 
       console.log(
-        `[nardi:onJoin] user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=true`,
+        `[nardi:onJoin] roomId=${this.roomId} user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=true`,
       );
       return;
     }
@@ -193,7 +203,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     await ensureRoomMembership(this.state.dbRoomId, auth.userId, seatNumber);
 
     console.log(
-      `[nardi:onJoin] user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=false`,
+      `[nardi:onJoin] roomId=${this.roomId} user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=false`,
     );
   }
 
@@ -205,22 +215,44 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     if (!seat) return;
 
     console.log(
-      `[nardi:onLeave] user=${shortUserId(session.userId)} clients=${Math.max(0, this.clients.length - 1)}/${this.maxClients} consented=${consented}`,
+      `[nardi:onLeave] roomId=${this.roomId} user=${shortUserId(session.userId)} clients=${Math.max(0, this.clients.length - 1)}/${this.maxClients} consented=${consented}`,
     );
 
     /**
-     * Waiting lobby: free the Colyseus client slot immediately.
-     * Do NOT call allowReconnection here — a reserved reconnect seat would count toward
-     * maxClients and falsely lock a 2-player room (1 connected + 1 reservation = full).
-     *
-     * Consented leave drops DB membership. Accidental disconnect keeps DB claim so the
-     * same user can rejoin without permanently blocking the invitee.
+     * Waiting lobby:
+     * - Consented leave: free the seat immediately (empty room auto-disposes).
+     * - Accidental disconnect: short reconnect hold so a dropped creator WS does not
+     *   instantly wipe the invite. Reconnect seats do not call _incrementClientCount;
+     *   with clients=0 + 1 reconnect reservation, a guest can still reserve.
      */
     if (!this.matchStarted && this.state.phase === RoomPhase.WAITING) {
-      this.state.seats.delete(String(session.seatNumber));
-      this.sessions.delete(client.sessionId);
-      this.userToSession.delete(session.userId);
       if (consented) {
+        this.state.seats.delete(String(session.seatNumber));
+        this.sessions.delete(client.sessionId);
+        this.userToSession.delete(session.userId);
+        await markPlayerLeft(this.state.dbRoomId, session.userId);
+        return;
+      }
+
+      const waitingGraceMs = Math.min(15_000, getEnv().RECONNECT_GRACE_MS);
+      seat.connected = false;
+      seat.reconnecting = true;
+      this.broadcast(ServerEvent.PLAYER_DISCONNECTED, {
+        type: ServerEvent.PLAYER_DISCONNECTED,
+        userId: session.userId,
+        seatNumber: session.seatNumber,
+        graceMsRemaining: waitingGraceMs,
+      });
+
+      try {
+        await this.allowReconnection(client, waitingGraceMs / 1000);
+        seat.connected = true;
+        seat.reconnecting = false;
+      } catch {
+        seat.reconnecting = false;
+        this.state.seats.delete(String(session.seatNumber));
+        this.sessions.delete(client.sessionId);
+        this.userToSession.delete(session.userId);
         await markPlayerLeft(this.state.dbRoomId, session.userId);
       }
       return;

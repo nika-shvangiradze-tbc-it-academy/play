@@ -10,11 +10,17 @@
       <div class="code-block">
         <span class="code-label">Room</span>
         <strong class="code">{{ view()?.inviteCode || inviteCode() }}</strong>
-        <button type="button" class="btn btn-ghost" (click)="copyCode()">
+        <button type="button" class="btn btn-ghost" (click)="copyCode()" [disabled]="!socketOpen()">
           {{ copied() ? 'Copied' : 'Copy Code' }}
         </button>
       </div>
     </header>
+
+    @if (!socketOpen()) {
+      <p class="error-text">
+        Connection lost — this table is no longer joinable. Return to the lobby and create a new one.
+      </p>
+    }
 
     <div class="seats">
       @for (i of [0, 1]; track i) {
@@ -29,8 +35,8 @@
       }
     </div>
 
-    @if (colyseus.lastError()) {
-      <p class="error-text">{{ colyseus.lastError() }}</p>
+    @if (session.lastError()) {
+      <p class="error-text">{{ session.lastError() }}</p>
     }
 
     <div class="actions">

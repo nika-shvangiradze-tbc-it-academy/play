@@ -198,7 +198,7 @@ export function createApiRouter(): Router {
         nardiRegistered = false;
       }
       console.log(
-        `[rooms:create] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId ?? 'none'} nardi=${nardiRegistered}`,
+        `[rooms:create] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId ?? 'none'} pid=${process.pid} nardi=${nardiRegistered}`,
       );
 
       console.log('[rooms:create] creating database room');
@@ -241,7 +241,13 @@ export function createApiRouter(): Router {
         ? Object.keys(live.reservedSeats).length
         : 0;
       console.log(
-        `[rooms:create] colyseus roomId=${colyseusRoomId} clients=${clientCount}/${created.maxPlayers} reserved=${reservedCount}`,
+        `[rooms:create] room created roomId=${colyseusRoomId} processId=${matchMaker.processId} pid=${process.pid}`,
+      );
+      console.log(
+        `[rooms:create] creator reservation sessionId=${String(reservation.sessionId).slice(0, 8)}`,
+      );
+      console.log(
+        `[rooms:create] reservedSeats=${reservedCount} clients=${clientCount}/${created.maxPlayers}`,
       );
 
       await withTimeout(
@@ -420,8 +426,11 @@ export function createApiRouter(): Router {
         | { clients?: { length: number }; hasReachedMaxClients?: () => boolean }
         | undefined;
       const clientCount = live?.clients?.length ?? 0;
+      const matchMakerFound = !!live;
+      console.log(`[rooms:join] dbRoom=${room.id}`);
+      console.log(`[rooms:join] colyseusRoomId=${room.colyseusRoomId}`);
       console.log(
-        `[rooms:join] colyseus room=${room.colyseusRoomId} clients=${clientCount}/${room.maxPlayers}`,
+        `[rooms:join] matchMakerFound=${matchMakerFound} processId=${matchMaker.processId} pid=${process.pid} clients=${clientCount}/${room.maxPlayers}`,
       );
 
       if (!live) {

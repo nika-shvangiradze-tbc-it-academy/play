@@ -11,6 +11,14 @@ import { NardiRoom } from './rooms/NardiRoom.js';
 async function main(): Promise<void> {
   const env = getEnv();
   logSupabaseKeyConfigOnce();
+
+  const webConcurrency = process.env['WEB_CONCURRENCY'];
+  if (webConcurrency && Number(webConcurrency) > 1) {
+    console.error(
+      `[game-server] WEB_CONCURRENCY=${webConcurrency} is unsafe for process-local matchMaker. Set WEB_CONCURRENCY=1.`,
+    );
+  }
+
   const app = express();
 
   // CORS must run before routes so preflight OPTIONS and auth errors still get headers.
@@ -22,7 +30,12 @@ async function main(): Promise<void> {
   const gameServer = new Server({
     // Required so seat reservations advertise the public host clients actually use.
     ...(env.PUBLIC_ADDRESS ? { publicAddress: env.PUBLIC_ADDRESS } : {}),
-    transport: new WebSocketTransport({ server: httpServer }),
+    transport: new WebSocketTransport({
+      server: httpServer,
+      // Render/proxies can drop aggressive ping/pong; keep alive without false terminates.
+      pingInterval: 30_000,
+      pingMaxRetries: 4,
+    }),
     // Single-node: always create rooms on this process (skip presence IPC selection).
     selectProcessIdToCreateRoom: async () => matchMaker.processId,
   });
@@ -32,7 +45,7 @@ async function main(): Promise<void> {
   // Must use gameServer.listen so matchMaker.accept() runs (IPC / READY state).
   // Calling httpServer.listen alone leaves matchmaking half-initialized.
   await gameServer.listen(env.PORT);
-  console.log(`[game-server] listening on :${env.PORT}`);
+  console.log(`[game-server] listening on :${env.PORT} pid=${process.pid}`);
   console.log(
     `[game-server] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId} nardi=${
       matchMaker.getHandler('nardi') ? 'yes' : 'no'

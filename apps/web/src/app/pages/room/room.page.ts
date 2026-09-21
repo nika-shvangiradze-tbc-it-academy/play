@@ -1,6 +1,6 @@
 import { Component, computed, inject, OnDestroy, OnInit, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { ColyseusService } from '../../core/game/colyseus.service';
+import { GameSessionService } from '../../core/game/game-session.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { NardiBoardComponent } from '../../games/nardi/nardi-board.component';
 
@@ -12,7 +12,7 @@ import { NardiBoardComponent } from '../../games/nardi/nardi-board.component';
   styleUrl: './room.page.scss',
 })
 export class RoomPage implements OnInit, OnDestroy {
-  readonly colyseus = inject(ColyseusService);
+  readonly session = inject(GameSessionService);
   readonly auth = inject(AuthService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
@@ -20,8 +20,10 @@ export class RoomPage implements OnInit, OnDestroy {
   readonly copied = signal(false);
   readonly inviteCode = signal('');
 
-  readonly view = this.colyseus.view;
-  readonly mySeat = this.colyseus.mySeat;
+  readonly view = this.session.view;
+  readonly mySeat = this.session.mySeat;
+  readonly connected = this.session.connected;
+  readonly socketOpen = this.session.socketOpen;
   readonly isPlaying = computed(() => this.view()?.phase === 'PLAYING' || this.view()?.phase === 'FINISHED');
   readonly isHost = computed(() => {
     const v = this.view();
@@ -32,13 +34,15 @@ export class RoomPage implements OnInit, OnDestroy {
   ngOnInit(): void {
     const code = this.route.snapshot.paramMap.get('inviteCode') ?? '';
     this.inviteCode.set(code);
-    if (!this.colyseus.connected()) {
+    // Connection is owned by GameSessionService — do not leave on route init.
+    if (!this.session.connected() && !this.session.socketOpen()) {
       void this.router.navigateByUrl('/lobby');
     }
   }
 
   ngOnDestroy(): void {
-    // Keep connection while navigating within match; leave explicitly via button
+    // Keep the Colyseus Room on GameSessionService across navigations.
+    // Explicit leave is only via the Leave button / logout.
   }
 
   async copyCode(): Promise<void> {
@@ -55,13 +59,12 @@ export class RoomPage implements OnInit, OnDestroy {
   toggleReady(): void {
     const seat = this.mySeat();
     if (!seat) return;
-    if (seat.isReady) this.colyseus.unready();
-    else this.colyseus.ready();
+    if (seat.isReady) this.session.unready();
+    else this.session.ready();
   }
 
   async leave(): Promise<void> {
-    // Single leave path — do not also send LEAVE_ROOM (that double-closes the socket).
-    await this.colyseus.leave();
+    await this.session.leave();
     await this.router.navigateByUrl('/lobby');
   }
 

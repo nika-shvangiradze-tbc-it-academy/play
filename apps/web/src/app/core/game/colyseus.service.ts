@@ -54,7 +54,7 @@ export class ColyseusService {
   private readonly auth = inject(AuthService);
   private client = new Client(environment.gameServerWsUrl);
   private room: Room | null = null;
-  /** Prevents overlapping joinById / leave races that close an in-flight socket. */
+  /** Prevents overlapping join / leave races that close an in-flight socket. */
   private joinEpoch = 0;
   private joinInFlight: Promise<void> | null = null;
 
@@ -62,8 +62,10 @@ export class ColyseusService {
   readonly connecting = signal(false);
   readonly lastError = signal<string | null>(null);
   readonly view = signal<LiveRoomView | null>(null);
-  /** Test/diagnostic: how many joinById attempts were started. */
+  /** Test/diagnostic: how many consume attempts were started. */
   readonly joinAttempts = signal(0);
+  /** True while the underlying WebSocket reports OPEN. */
+  readonly socketOpen = signal(false);
 
   readonly mySeat = computed(() => {
     const uid = this.auth.user()?.id;
@@ -79,6 +81,10 @@ export class ColyseusService {
     return v.phase === 'PLAYING' && v.currentTurn === seat.seatNumber;
   });
 
+  currentRoomId(): string | null {
+    return this.room?.roomId ?? null;
+  }
+
   /**
    * Consume a server-issued Colyseus 0.15 seat reservation exactly once.
    * Do not call joinById with only a room id — empty rooms auto-dispose without a reservation.
@@ -90,36 +96,47 @@ export class ColyseusService {
 
     const colyseusRoomId = reservation.room.roomId;
 
-    if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
+    if (this.room && this.room.roomId === colyseusRoomId && this.isRoomSocketOpen(this.room)) {
       console.info('[colyseus] consumeReservation skipped — already connected', colyseusRoomId);
+      this.connected.set(true);
+      this.socketOpen.set(true);
       return;
     }
 
     if (this.joinInFlight) {
       console.info('[colyseus] consumeReservation waiting for in-flight join');
       await this.joinInFlight;
-      if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
+      if (this.room && this.room.roomId === colyseusRoomId && this.isRoomSocketOpen(this.room)) {
+        this.connected.set(true);
+        this.socketOpen.set(true);
         return;
       }
     }
 
     console.info(
-      '[client:create] attempting joinById/consumeSeatReservation',
+      '[client:create] attempting consumeSeatReservation',
       colyseusRoomId,
       'session',
-      reservation.sessionId,
+      reservation.sessionId.slice(0, 8),
       'via',
       environment.gameServerWsUrl,
     );
     this.joinAttempts.update((n) => n + 1);
 
-    const run = this.connect(async () =>
-      this.client.consumeSeatReservation(reservation),
-    );
+    const run = this.connect(async () => this.client.consumeSeatReservation(reservation));
     this.joinInFlight = run.finally(() => {
       this.joinInFlight = null;
     });
     await this.joinInFlight;
+  }
+
+  private isRoomSocketOpen(room: Room): boolean {
+    const conn = (room as Room & { connection?: { isOpen?: boolean; readyState?: number } })
+      .connection;
+    if (!conn) return false;
+    if (typeof conn.isOpen === 'boolean') return conn.isOpen;
+    // Fallback for raw WebSocket-shaped transports
+    return conn.readyState === 1;
   }
 
   private async withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -148,29 +165,57 @@ export class ColyseusService {
     const epoch = ++this.joinEpoch;
     this.connecting.set(true);
     this.lastError.set(null);
+    let joined: Room | null = null;
     try {
-      await this.detachCurrentRoom(/* consented */ false);
+      // Only detach a *different* live room. Never leave(false) a socket we are
+      // about to keep — WAITING rooms autoDispose on empty.
+      if (this.room) {
+        await this.detachCurrentRoom(/* consented */ false);
+      }
       if (epoch !== this.joinEpoch) {
         throw new Error('Join superseded');
       }
-      const room = await this.withTimeout(factory(), 30_000, 'WebSocket join');
+      joined = await this.withTimeout(factory(), 30_000, 'WebSocket join');
       if (epoch !== this.joinEpoch) {
         try {
-          await room.leave(false);
+          await joined.leave(false);
         } catch {
           /* ignore */
         }
+        joined = null;
         throw new Error('Join superseded');
       }
-      this.room = room;
+      this.room = joined;
       this.connected.set(true);
-      this.bindRoom(room);
-      this.syncFromState(room);
+      this.socketOpen.set(this.isRoomSocketOpen(joined));
+      this.bindRoom(joined);
+      this.syncFromState(joined);
+      console.info(
+        '[client:create] reservation consumed roomId=',
+        joined.roomId,
+        'socketOpen=',
+        this.socketOpen(),
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Connection failed';
       console.error('[colyseus] connect failed', err);
       this.lastError.set(message);
       this.connected.set(false);
+      this.socketOpen.set(false);
+      if (joined && this.room === joined) {
+        this.room = null;
+        try {
+          await joined.leave(false);
+        } catch {
+          /* ignore */
+        }
+      } else if (joined) {
+        try {
+          await joined.leave(false);
+        } catch {
+          /* ignore */
+        }
+      }
       throw err instanceof Error ? err : new Error(message);
     } finally {
       if (epoch === this.joinEpoch) {
@@ -183,6 +228,7 @@ export class ColyseusService {
     room.onStateChange(() => {
       if (this.room !== room) return;
       this.syncFromState(room);
+      this.socketOpen.set(this.isRoomSocketOpen(room));
     });
     room.onError((code, message) => {
       if (this.room !== room) return;
@@ -190,7 +236,15 @@ export class ColyseusService {
     });
     room.onLeave((code) => {
       if (this.room !== room) return;
+      console.warn(
+        '[colyseus] room onLeave code=',
+        code,
+        'roomId=',
+        room.roomId,
+        '— connection dropped; WAITING rooms dispose when empty',
+      );
       this.connected.set(false);
+      this.socketOpen.set(false);
       this.room = null;
       if (code !== 1000) {
         this.lastError.set('Disconnected from room');
@@ -323,10 +377,17 @@ export class ColyseusService {
     const room = this.room;
     this.room = null;
     this.connected.set(false);
+    this.socketOpen.set(false);
     if (!room) {
       this.view.set(null);
       return;
     }
+    console.info(
+      '[colyseus] detachCurrentRoom consented=',
+      consented,
+      'roomId=',
+      room.roomId,
+    );
     try {
       await room.leave(consented);
     } catch {
