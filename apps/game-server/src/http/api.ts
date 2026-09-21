@@ -87,6 +87,9 @@ export function createApiRouter(): Router {
       };
 
       const room = await matchMaker.createRoom('nardi', metadata);
+      console.log(
+        `[POST /rooms] db=${created.roomId} colyseus=${room.roomId} invite=${created.inviteCode}`,
+      );
       await setColyseusRoomId(created.roomId, room.roomId);
 
       res.status(201).json({

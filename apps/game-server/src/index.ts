@@ -20,17 +20,23 @@ async function main(): Promise<void> {
 
   const httpServer = createServer(app);
   const gameServer = new Server({
+    // Required so seat reservations advertise the public host clients actually use.
+    ...(env.PUBLIC_ADDRESS ? { publicAddress: env.PUBLIC_ADDRESS } : {}),
     transport: new WebSocketTransport({ server: httpServer }),
   });
 
   gameServer.define('nardi', NardiRoom);
 
-  httpServer.listen(env.PORT, () => {
-    console.log(`[game-server] listening on :${env.PORT}`);
-    if (isDev()) {
-      console.log(`[game-server] CORS origins=${env.CORS_ORIGINS.join(',')}`);
-    }
-  });
+  // Must use gameServer.listen so matchMaker.accept() runs (IPC / READY state).
+  // Calling httpServer.listen alone leaves matchmaking half-initialized.
+  await gameServer.listen(env.PORT);
+  console.log(`[game-server] listening on :${env.PORT}`);
+  if (env.PUBLIC_ADDRESS) {
+    console.log(`[game-server] publicAddress=${env.PUBLIC_ADDRESS}`);
+  }
+  if (isDev()) {
+    console.log(`[game-server] CORS origins=${env.CORS_ORIGINS.join(',')}`);
+  }
 }
 
 main().catch((err) => {

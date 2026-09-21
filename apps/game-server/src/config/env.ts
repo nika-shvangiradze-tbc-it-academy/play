@@ -40,6 +40,13 @@ const envSchema = z
     RECONNECT_GRACE_MS: z.coerce.number().default(60_000),
     RATE_LIMIT_CREATE_ROOM_PER_MIN: z.coerce.number().default(10),
     RATE_LIMIT_JOIN_ROOM_PER_MIN: z.coerce.number().default(30),
+    /**
+     * Public hostname clients use for Colyseus WebSockets (no protocol).
+     * Example: play-2cb4.onrender.com
+     * Falls back to RENDER_EXTERNAL_HOSTNAME when unset.
+     */
+    PUBLIC_ADDRESS: z.string().min(1).optional(),
+    RENDER_EXTERNAL_HOSTNAME: z.string().min(1).optional(),
     /** Preferred: comma-separated browser origins. */
     CORS_ORIGINS: z.string().optional(),
     /** Legacy single/csv alias — used only when CORS_ORIGINS is unset. */
@@ -108,6 +115,10 @@ const envSchema = z
       RECONNECT_GRACE_MS: raw.RECONNECT_GRACE_MS,
       RATE_LIMIT_CREATE_ROOM_PER_MIN: raw.RATE_LIMIT_CREATE_ROOM_PER_MIN,
       RATE_LIMIT_JOIN_ROOM_PER_MIN: raw.RATE_LIMIT_JOIN_ROOM_PER_MIN,
+      PUBLIC_ADDRESS: (raw.PUBLIC_ADDRESS ?? raw.RENDER_EXTERNAL_HOSTNAME)?.replace(
+        /^https?:\/\//,
+        '',
+      ),
       CORS_ORIGINS: parseCorsOrigins(corsRaw),
     };
   });

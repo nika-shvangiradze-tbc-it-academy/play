@@ -74,9 +74,33 @@ export class ColyseusService {
   });
 
   async joinById(colyseusRoomId: string): Promise<void> {
+    if (!colyseusRoomId) {
+      throw new Error('Missing Colyseus room id from server');
+    }
+    console.info('[colyseus] joinById', colyseusRoomId, 'via', environment.gameServerWsUrl);
     await this.connect(async (token) =>
       this.client.joinById(colyseusRoomId, { accessToken: token }),
     );
+  }
+
+  private async withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(
+              new Error(
+                `${label} timed out after ${Math.round(ms / 1000)}s. The game server may be waking up — try again.`,
+              ),
+            );
+          }, ms);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   private async connect(factory: (token: string) => Promise<Room>): Promise<void> {
@@ -87,16 +111,17 @@ export class ColyseusService {
     this.lastError.set(null);
     try {
       await this.leave();
-      const room = await factory(token);
+      const room = await this.withTimeout(factory(token), 30_000, 'WebSocket join');
       this.room = room;
       this.connected.set(true);
       this.bindRoom(room);
       this.syncFromState(room);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Connection failed';
+      console.error('[colyseus] connect failed', err);
       this.lastError.set(message);
       this.connected.set(false);
-      throw err;
+      throw err instanceof Error ? err : new Error(message);
     } finally {
       this.connecting.set(false);
     }
