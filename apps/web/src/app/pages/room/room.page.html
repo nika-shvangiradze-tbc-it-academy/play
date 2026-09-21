@@ -1,0 +1,45 @@
+@if (isPlaying() && view(); as v) {
+  <app-nardi-board />
+} @else {
+  <section class="waiting panel">
+    <header class="waiting-head">
+      <div>
+        <p class="eyebrow">{{ view()?.gameType?.toUpperCase() || 'NARDI' }}</p>
+        <h1>Waiting room</h1>
+      </div>
+      <div class="code-block">
+        <span class="code-label">Room</span>
+        <strong class="code">{{ view()?.inviteCode || inviteCode() }}</strong>
+        <button type="button" class="btn btn-ghost" (click)="copyCode()">
+          {{ copied() ? 'Copied' : 'Copy Code' }}
+        </button>
+      </div>
+    </header>
+
+    <div class="seats">
+      @for (i of [0, 1]; track i) {
+        <article class="seat" [class.filled]="seatPresent(i)" [class.ready]="seatReady(i)">
+          <p class="seat-label">Player {{ i + 1 }}</p>
+          <h2>{{ seatLabel(i) }}</h2>
+          <p class="seat-status">{{ seatStatus(i) }}</p>
+          @if (isHost() && i === 0) {
+            <span class="host-tag">Host</span>
+          }
+        </article>
+      }
+    </div>
+
+    @if (colyseus.lastError()) {
+      <p class="error-text">{{ colyseus.lastError() }}</p>
+    }
+
+    <div class="actions">
+      <button type="button" class="btn btn-primary" (click)="toggleReady()" [disabled]="!mySeat()">
+        {{ mySeat()?.isReady ? 'Unready' : 'Ready' }}
+      </button>
+      <button type="button" class="btn btn-danger" (click)="leave()">Leave table</button>
+    </div>
+
+    <p class="hint">Match starts automatically when both players are ready.</p>
+  </section>
+}

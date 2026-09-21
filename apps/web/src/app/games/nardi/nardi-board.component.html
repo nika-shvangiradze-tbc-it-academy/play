@@ -1,0 +1,223 @@
+@if (view(); as v) {
+  <section class="table-shell">
+    <header class="table-bar">
+      <div class="meta">
+        <div class="title-lockup">
+          <span class="game-name">ნარდი</span>
+          <span class="game-legend">ვეფხისტყაოსანი</span>
+        </div>
+        <span class="room-code" title="Invite code">{{ v.inviteCode }}</span>
+        <span class="conn" [class.ok]="colyseus.connected()">
+          {{ colyseus.connected() ? 'Live' : 'Reconnecting…' }}
+        </span>
+      </div>
+      <p class="status">{{ statusText() }}</p>
+      <div class="players">
+        @for (seat of v.seats; track seat.seatNumber) {
+          <div
+            class="player-chip"
+            [class.active]="v.currentTurn === seat.seatNumber && v.phase === 'PLAYING'"
+            [class.me]="mySeat()?.seatNumber === seat.seatNumber"
+          >
+            <span>{{ seat.username }}</span>
+            @if (seat.reconnecting) {
+              <small>disconnected</small>
+            }
+          </div>
+        }
+      </div>
+    </header>
+
+    <div class="board-frame">
+      <div class="playing-field">
+        <div class="quadrant top left-half">
+          @for (p of topLeftPoints; track p) {
+            <button
+              type="button"
+              class="point top"
+              [class.dark]="p % 2 === 0"
+              [class.light]="p % 2 !== 0"
+              [class.selectable]="isSelectable(p)"
+              [class.target]="isTarget(p)"
+              [class.selected]="selectedFrom() === p"
+              (click)="onPointClick(p)"
+            >
+              @if (checkersAt(p); as c) {
+                <div class="stack" [class.from-top]="true">
+                  @for (i of checkerArray(c.count); track i) {
+                    <span class="checker" [class.p0]="c.player === 0" [class.p1]="c.player === 1"></span>
+                  }
+                  @if (overflow(c.count); as n) {
+                    @if (n) {
+                      <span class="count">{{ n }}</span>
+                    }
+                  }
+                </div>
+              }
+              <span class="pip">{{ p }}</span>
+            </button>
+          }
+        </div>
+
+        <div class="center-bar" [class.selected]="selectedFrom() === BAR">
+          <button class="bar-zone bar-p1" type="button" (click)="onBarClick(1)" aria-label="Player 2 captured checkers">
+            @for (i of checkerArray(v.bar1); track i) {
+              <span class="checker p1"></span>
+            }
+            @if (overflow(v.bar1); as n) {
+              @if (n) { <span class="count">{{ n }}</span> }
+            }
+          </button>
+          <span class="bar-mark" aria-hidden="true"></span>
+          <button class="bar-zone bar-p0" type="button" (click)="onBarClick(0)" aria-label="Player 1 captured checkers">
+            @for (i of checkerArray(v.bar0); track i) {
+              <span class="checker p0"></span>
+            }
+            @if (overflow(v.bar0); as n) {
+              @if (n) { <span class="count">{{ n }}</span> }
+            }
+          </button>
+        </div>
+
+        <div class="quadrant top right-half">
+          @for (p of topRightPoints; track p) {
+            <button
+              type="button"
+              class="point top"
+              [class.dark]="p % 2 === 0"
+              [class.light]="p % 2 !== 0"
+              [class.selectable]="isSelectable(p)"
+              [class.target]="isTarget(p)"
+              [class.selected]="selectedFrom() === p"
+              (click)="onPointClick(p)"
+            >
+              @if (checkersAt(p); as c) {
+                <div class="stack from-top">
+                  @for (i of checkerArray(c.count); track i) {
+                    <span class="checker" [class.p0]="c.player === 0" [class.p1]="c.player === 1"></span>
+                  }
+                  @if (overflow(c.count); as n) {
+                    @if (n) { <span class="count">{{ n }}</span> }
+                  }
+                </div>
+              }
+              <span class="pip">{{ p }}</span>
+            </button>
+          }
+        </div>
+
+        <div class="quadrant bottom left-half">
+          @for (p of bottomLeftPoints; track p) {
+            <button
+              type="button"
+              class="point bottom"
+              [class.dark]="p % 2 === 0"
+              [class.light]="p % 2 !== 0"
+              [class.selectable]="isSelectable(p)"
+              [class.target]="isTarget(p)"
+              [class.selected]="selectedFrom() === p"
+              (click)="onPointClick(p)"
+            >
+              <span class="pip">{{ p }}</span>
+              @if (checkersAt(p); as c) {
+                <div class="stack">
+                  @for (i of checkerArray(c.count); track i) {
+                    <span class="checker" [class.p0]="c.player === 0" [class.p1]="c.player === 1"></span>
+                  }
+                  @if (overflow(c.count); as n) {
+                    @if (n) { <span class="count">{{ n }}</span> }
+                  }
+                </div>
+              }
+            </button>
+          }
+        </div>
+
+        <div class="quadrant bottom right-half">
+          @for (p of bottomRightPoints; track p) {
+            <button
+              type="button"
+              class="point bottom"
+              [class.dark]="p % 2 === 0"
+              [class.light]="p % 2 !== 0"
+              [class.selectable]="isSelectable(p)"
+              [class.target]="isTarget(p)"
+              [class.selected]="selectedFrom() === p"
+              (click)="onPointClick(p)"
+            >
+              <span class="pip">{{ p }}</span>
+              @if (checkersAt(p); as c) {
+                <div class="stack">
+                  @for (i of checkerArray(c.count); track i) {
+                    <span class="checker" [class.p0]="c.player === 0" [class.p1]="c.player === 1"></span>
+                  }
+                  @if (overflow(c.count); as n) {
+                    @if (n) { <span class="count">{{ n }}</span> }
+                  }
+                </div>
+              }
+            </button>
+          }
+        </div>
+
+        @if (v.dice.rolled && v.dice.d1 > 0 && v.dice.d2 > 0) {
+          <div
+            class="board-dice"
+            [class.landing-a]="v.turnNumber % 3 === 0"
+            [class.landing-b]="v.turnNumber % 3 === 1"
+            [class.landing-c]="v.turnNumber % 3 === 2"
+            role="status"
+            aria-live="polite"
+            [attr.aria-label]="'Dice roll: ' + v.dice.d1 + ' and ' + v.dice.d2"
+          >
+            <span class="thrown-die die-one" [attr.aria-label]="'Die ' + v.dice.d1">
+              <span class="die-face" aria-hidden="true">
+                @for (slot of dicePips(v.dice.d1); track slot) {
+                  <i class="die-pip" [class]="'die-pip pip-' + slot"></i>
+                }
+              </span>
+            </span>
+            <span class="thrown-die die-two" [attr.aria-label]="'Die ' + v.dice.d2">
+              <span class="die-face" aria-hidden="true">
+                @for (slot of dicePips(v.dice.d2); track slot) {
+                  <i class="die-pip" [class]="'die-pip pip-' + slot"></i>
+                }
+              </span>
+            </span>
+          </div>
+        }
+      </div>
+    </div>
+
+    <div class="game-toolbar panel">
+      <div class="off-box player-one">
+        <span class="player-disc p0" aria-hidden="true"></span>
+        <span>{{ playerName(0) }}</span>
+        <strong>Off {{ v.off0 }}</strong>
+      </div>
+
+      <div class="dice-area">
+        <button type="button" class="btn btn-primary roll-btn" [disabled]="!canRoll()" (click)="roll()">
+          Roll Dice
+        </button>
+        <button type="button" class="btn btn-ghost bear-off-btn" [disabled]="!canBearOff()" (click)="bearOff()">
+          Bear off
+        </button>
+      </div>
+
+      <div class="off-box player-two">
+        <span class="player-disc p1" aria-hidden="true"></span>
+        <span>{{ playerName(1) }}</span>
+        <strong>Off {{ v.off1 }}</strong>
+      </div>
+    </div>
+
+    @if (colyseus.lastError()) {
+      <p class="error-text">{{ colyseus.lastError() }}</p>
+    }
+
+    <p class="help">
+      Select a highlighted checker, then a glowing destination. Dice and legality are decided by the server.
+    </p>
+  </section>
+}

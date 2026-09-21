@@ -1,0 +1,29 @@
+{
+  "name": "georgian-games",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Production multiplayer Georgian classics gaming platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,server -c cyan,magenta \"npm run dev -w @georgian-games/web\" \"npm run dev -w @georgian-games/game-server\"",
+    "build": "npm run build -w @georgian-games/shared && npm run build -w @georgian-games/game-server && npm run build -w @georgian-games/web",
+    "build:shared": "npm run build -w @georgian-games/shared",
+    "build:server": "npm run build -w @georgian-games/game-server",
+    "build:web": "npm run build -w @georgian-games/web",
+    "test": "npm run test -w @georgian-games/shared && npm run test -w @georgian-games/game-server",
+    "test:shared": "npm run test -w @georgian-games/shared",
+    "test:server": "npm run test -w @georgian-games/game-server",
+    "lint": "npm run lint -w @georgian-games/shared --if-present && npm run lint -w @georgian-games/game-server --if-present && npm run lint -w @georgian-games/web --if-present",
+    "typecheck": "npm run typecheck -w @georgian-games/shared && npm run typecheck -w @georgian-games/game-server && npm run typecheck -w @georgian-games/web --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "~5.7.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

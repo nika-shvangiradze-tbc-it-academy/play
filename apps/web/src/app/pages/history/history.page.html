@@ -1,0 +1,43 @@
+<section class="history">
+  <header>
+    <h1>Match history</h1>
+    <p>Your completed and abandoned matches.</p>
+  </header>
+
+  @if (loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  } @else if (items().length === 0) {
+    <p class="muted">No matches yet. Create a Nardi table to get started.</p>
+  } @else {
+    <div class="list">
+      @for (entry of items(); track entry.match_id) {
+        <article class="panel row">
+          <div>
+            <h2>{{ entry.game_type }}</h2>
+            <p class="date">{{ formatDate(entry.started_at) }}</p>
+          </div>
+          <div>
+            <p class="label">Opponents</p>
+            <p>{{ opponentsLabel(entry) }}</p>
+          </div>
+          <div>
+            <p class="label">Result</p>
+            <p class="result">{{ entry.result }}</p>
+          </div>
+          <div>
+            <p class="label">Score</p>
+            <p>{{ entry.score ?? '—' }}</p>
+          </div>
+        </article>
+      }
+    </div>
+
+    <div class="pager">
+      <button type="button" class="btn btn-ghost" [disabled]="page() <= 1" (click)="prev()">Previous</button>
+      <span>Page {{ page() }}</span>
+      <button type="button" class="btn btn-ghost" [disabled]="!hasMore()" (click)="next()">Next</button>
+    </div>
+  }
+</section>

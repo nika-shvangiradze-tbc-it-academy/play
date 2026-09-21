@@ -1,0 +1,22 @@
+# Deploy Angular only from the monorepo root so npm workspaces resolve
+# @georgian-games/shared from packages/shared (never from npmjs.org).
+#
+# CRITICAL: Keep Base directory at the repository root.
+# If Netlify UI has Base directory = apps/web, npm prints
+# "No npm workspaces detected" and tries to fetch @georgian-games/shared
+# from the public registry (404).
+#
+# Colyseus (apps/game-server) must be hosted on a Node/WebSocket-capable platform.
+
+[build]
+  base = "."
+  command = "npm run build:shared && npm run build:web"
+  publish = "apps/web/dist/web/browser"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

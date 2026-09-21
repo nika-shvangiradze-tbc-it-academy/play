@@ -1,0 +1,27 @@
+<section class="hero">
+  <div class="hero-copy">
+    <p class="eyebrow">Georgian table classics</p>
+    <h1>გართობა</h1>
+    <p class="tagline">იღბალი. ოსტატობა. გამარჯვება.</p>
+    <p class="sub">Create a private table, invite your friends and play live.</p>
+    <div class="cta-row">
+      @if (auth.isAuthenticated()) {
+        <a routerLink="/lobby" class="btn btn-primary">Play Now</a>
+      } @else {
+        <a routerLink="/register" class="btn btn-primary">Play Now</a>
+        <a routerLink="/login" class="btn btn-ghost">I have an account</a>
+      }
+    </div>
+  </div>
+  <div class="hero-visual" aria-hidden="true">
+    <div class="board-glow"></div>
+    <div class="board-frame">
+      <div class="point light"></div>
+      <div class="point dark"></div>
+      <div class="point light"></div>
+      <div class="point dark"></div>
+      <div class="point light"></div>
+      <div class="point dark"></div>
+    </div>
+  </div>
+</section>

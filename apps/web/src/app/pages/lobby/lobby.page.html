@@ -1,0 +1,67 @@
+<section class="lobby">
+  <header class="lobby-head">
+    <h1>Games</h1>
+    <p>Private tables. Invite-only. Live play.</p>
+  </header>
+
+  @if (nardiMode() === 'menu') {
+    <div class="game-grid">
+      @for (game of games; track game.type) {
+        <article class="game-card panel" [class.soon]="!game.available">
+          <div class="game-meta">
+            <h2>{{ game.name }}</h2>
+            <p class="players">
+              @if (game.minPlayers === game.maxPlayers) {
+                {{ game.maxPlayers }} Players
+              } @else {
+                {{ game.minPlayers }} / {{ game.maxPlayers }} Players
+              }
+            </p>
+            <p class="desc">{{ game.description }}</p>
+          </div>
+          @if (game.available) {
+            <button type="button" class="btn btn-primary" (click)="selectNardi()">Play</button>
+          } @else {
+            <span class="soon-badge">Coming soon</span>
+          }
+        </article>
+      }
+    </div>
+  } @else {
+    <div class="nardi-actions panel">
+      <button type="button" class="back" (click)="backToGames()">← All games</button>
+      <h2>Nardi</h2>
+      <p class="lead">Create a private table or join with an invite code.</p>
+
+      <div class="action-columns">
+        <div class="action-block">
+          <h3>Create private table</h3>
+          <button type="button" class="btn btn-primary" [disabled]="busy()" (click)="createTable()">
+            {{ busy() ? 'Creating…' : 'Create Table' }}
+          </button>
+        </div>
+        <div class="action-block">
+          <h3>Join private table</h3>
+          <div class="field">
+            <label for="code">Enter code</label>
+            <input
+              id="code"
+              name="code"
+              [(ngModel)]="joinCode"
+              maxlength="8"
+              placeholder="7KQ9MX"
+              (keyup.enter)="joinTable()"
+            />
+          </div>
+          <button type="button" class="btn btn-ghost" [disabled]="busy()" (click)="joinTable()">
+            Join
+          </button>
+        </div>
+      </div>
+
+      @if (error()) {
+        <p class="error-text">{{ error() }}</p>
+      }
+    </div>
+  }
+</section>

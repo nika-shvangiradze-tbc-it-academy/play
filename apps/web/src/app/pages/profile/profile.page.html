@@ -1,0 +1,42 @@
+<section class="profile" >
+  @if (auth.profile(); as p) {
+    <div class="panel profile-card">
+      <div class="avatar" [style.backgroundImage]="avatarUrl ? 'url(' + avatarUrl + ')' : null">
+        @if (!avatarUrl) {
+          {{ p.username.slice(0, 1).toUpperCase() }}
+        }
+      </div>
+      <div class="info">
+        <h1>{{ p.username }}</h1>
+        <p class="joined">Joined {{ p.created_at | date: 'mediumDate' }}</p>
+        <div class="stats">
+          <div><span>Played</span><strong>{{ p.games_played }}</strong></div>
+          <div><span>Wins</span><strong>{{ p.games_won }}</strong></div>
+          <div><span>Losses</span><strong>{{ losses() }}</strong></div>
+          <div><span>Win rate</span><strong>{{ winRate() }}</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <form class="panel edit" (ngSubmit)="save()">
+      <h2>Edit profile</h2>
+      <div class="field">
+        <label for="username">Username</label>
+        <input id="username" name="username" [(ngModel)]="username" maxlength="20" />
+      </div>
+      <div class="field">
+        <label for="avatar">Avatar URL</label>
+        <input id="avatar" name="avatar" [(ngModel)]="avatarUrl" placeholder="https://…" />
+      </div>
+      @if (error()) {
+        <p class="error-text">{{ error() }}</p>
+      }
+      @if (success()) {
+        <p class="success-text">{{ success() }}</p>
+      }
+      <button class="btn btn-primary" type="submit" [disabled]="busy()">Save</button>
+    </form>
+  } @else {
+    <p class="muted">Loading profile…</p>
+  }
+</section>

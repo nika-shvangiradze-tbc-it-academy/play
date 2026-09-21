@@ -1,0 +1,47 @@
+<section class="auth-wrap">
+  <form class="panel auth-card" (ngSubmit)="submit()">
+    <h1>Create account</h1>
+    <p class="lead">Choose a unique username for the tables.</p>
+
+    <div class="field">
+      <label for="username">Username</label>
+      <input
+        id="username"
+        name="username"
+        [(ngModel)]="username"
+        required
+        minlength="3"
+        maxlength="20"
+        autocomplete="username"
+      />
+    </div>
+    <div class="field">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" [(ngModel)]="email" required autocomplete="email" />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        [(ngModel)]="password"
+        required
+        minlength="6"
+        autocomplete="new-password"
+      />
+    </div>
+
+    @if (error()) {
+      <p class="error-text">{{ error() }}</p>
+    }
+
+    <button class="btn btn-primary" type="submit" [disabled]="busy()">
+      {{ busy() ? 'Creating…' : 'Sign up' }}
+    </button>
+
+    <p class="footer-links">
+      <a routerLink="/login">Already have an account?</a>
+    </p>
+  </form>
+</section>

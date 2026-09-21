@@ -1,0 +1,36 @@
+<div class="shell">
+  <header class="topnav">
+    <a routerLink="/" class="brand" aria-label="გართობა — მთავარი გვერდი">
+      <span class="brand-mark" aria-hidden="true">
+        <span class="jester-cap">
+          <i class="jester-point point-left"></i>
+          <i class="jester-point point-center"></i>
+          <i class="jester-point point-right"></i>
+        </span>
+        <span class="domino-mark"><i></i><i></i><i></i></span>
+        <span class="checker-mark"></span>
+      </span>
+      <span class="brand-lockup">
+        <span class="brand-text">გართობა</span>
+      </span>
+    </a>
+
+    @if (auth.isAuthenticated()) {
+      <nav class="nav-links">
+        <a routerLink="/lobby" routerLinkActive="active">Games</a>
+        <a routerLink="/history" routerLinkActive="active">History</a>
+        <a routerLink="/profile" routerLinkActive="active">Profile</a>
+      </nav>
+      <button type="button" class="btn btn-ghost nav-logout" (click)="logout()">Logout</button>
+    } @else {
+      <nav class="nav-links">
+        <a routerLink="/login" routerLinkActive="active">Login</a>
+        <a routerLink="/register" class="btn btn-primary nav-cta">Sign up</a>
+      </nav>
+    }
+  </header>
+
+  <main class="main">
+    <router-outlet />
+  </main>
+</div>
