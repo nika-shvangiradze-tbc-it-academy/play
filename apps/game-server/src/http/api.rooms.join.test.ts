@@ -10,6 +10,8 @@ const MatchMakerState = {
 } as const;
 
 const handleCreateRoom = vi.fn();
+const reserveSeatFor = vi.fn();
+const joinById = vi.fn();
 const getHandler = vi.fn(() => ({}));
 const getRoomById = vi.fn();
 
@@ -21,6 +23,8 @@ vi.mock('@colyseus/core', () => ({
     getHandler,
     handleCreateRoom,
     createRoom: vi.fn(),
+    reserveSeatFor,
+    joinById,
     getRoomById,
   },
 }));
@@ -50,6 +54,7 @@ vi.mock('../db/rooms.js', async () => {
     getRoomOccupancy,
     lookupRoomByInviteCode,
     ensureRoomMembership,
+    clearColyseusRoomIdIfMatch: vi.fn(),
     reserveSeat: vi.fn(),
   };
 });
@@ -77,14 +82,28 @@ describe('multiplayer room join lifecycle (HTTP)', () => {
     lookupRoomByInviteCode.mockReset();
     ensureRoomMembership.mockReset();
     handleCreateRoom.mockReset();
+    reserveSeatFor.mockReset();
+    joinById.mockReset();
     getRoomById.mockReset();
     getHandler.mockReturnValue({});
 
-    handleCreateRoom.mockResolvedValue({ roomId: 'coly-1' });
+    handleCreateRoom.mockResolvedValue({
+      roomId: 'coly-1',
+      name: 'nardi',
+      processId: 'test-process',
+    });
+    reserveSeatFor.mockResolvedValue({
+      sessionId: 'host-sess',
+      room: { roomId: 'coly-1', name: 'nardi', processId: 'test-process' },
+    });
+    joinById.mockResolvedValue({
+      sessionId: 'guest-sess',
+      room: { roomId: 'coly-1', name: 'nardi', processId: 'test-process' },
+    });
     setColyseusRoomId.mockResolvedValue(undefined);
     abandonOrphanRoom.mockResolvedValue(undefined);
     getRoomById.mockReturnValue({
-      clients: [],
+      clients: [{}, {}],
       hasReachedMaxClients: () => false,
     });
   });
@@ -181,8 +200,13 @@ describe('multiplayer room join lifecycle (HTTP)', () => {
         body: JSON.stringify({ inviteCode: 'ABC234' }),
       });
       expect(joinRes.status).toBe(200);
-      const body = (await joinRes.json()) as { colyseusRoomId: string };
+      const body = (await joinRes.json()) as {
+        colyseusRoomId: string;
+        reservation: { sessionId: string; room: { roomId: string } };
+      };
       expect(body.colyseusRoomId).toBe('coly-1');
+      expect(body.reservation.sessionId).toBe('guest-sess');
+      expect(joinById).toHaveBeenCalled();
       // No HTTP membership insert — ensureRoomMembership is Colyseus-only.
       expect(ensureRoomMembership).not.toHaveBeenCalled();
     } finally {

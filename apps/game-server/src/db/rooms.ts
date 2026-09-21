@@ -107,6 +107,22 @@ export async function setColyseusRoomId(roomId: string, colyseusRoomId: string):
   }
 }
 
+/** Clear stale mapping when a Colyseus room disposes or is missing. */
+export async function clearColyseusRoomIdIfMatch(
+  roomId: string,
+  colyseusRoomId: string,
+): Promise<void> {
+  const supabase = getAdminClient();
+  const { error } = await supabase
+    .from('game_rooms')
+    .update({ colyseus_room_id: null })
+    .eq('id', roomId)
+    .eq('colyseus_room_id', colyseusRoomId);
+  if (error) {
+    console.error('[rooms] clearColyseusRoomIdIfMatch failed', roomId, error.message);
+  }
+}
+
 /**
  * Best-effort cleanup when Colyseus room creation fails after the DB row exists.
  * Deletes the incomplete room (and cascaded seats) so invite codes are not left half-created.

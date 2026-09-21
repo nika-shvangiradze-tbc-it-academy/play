@@ -60,6 +60,7 @@ describe('POST /api/rooms + Colyseus bootstrap integration', () => {
           totalRows: 1,
           distinctCount: 1,
         }),
+        clearColyseusRoomIdIfMatch: vi.fn().mockResolvedValue(undefined),
         lookupRoomByInviteCode: vi.fn(),
         reserveSeat: vi.fn(),
       };
@@ -124,8 +125,13 @@ describe('POST /api/rooms + Colyseus bootstrap integration', () => {
     const elapsed = Date.now() - started;
     expect(elapsed).toBeLessThan(5_000);
     expect(res.status).toBe(201);
-    const body = (await res.json()) as { colyseusRoomId: string };
+    const body = (await res.json()) as {
+      colyseusRoomId: string;
+      reservation: { sessionId: string; room: { roomId: string } };
+    };
     expect(body.colyseusRoomId).toBeTruthy();
+    expect(body.reservation.sessionId).toBeTruthy();
+    expect(body.reservation.room.roomId).toBe(body.colyseusRoomId);
     expect(matchMaker.getRoomById(body.colyseusRoomId)).toBeTruthy();
   });
 });

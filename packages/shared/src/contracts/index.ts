@@ -74,13 +74,29 @@ export interface CreateRoomOptions {
   gameType: GameType;
 }
 
-/** HTTP API: create room response. */
+/**
+ * Colyseus 0.15 seat reservation payload returned by our HTTP API.
+ * Client must call `client.consumeSeatReservation(reservation)` exactly once.
+ */
+export interface ColyseusSeatReservation {
+  sessionId: string;
+  room: {
+    roomId: string;
+    name: string;
+    processId: string;
+    publicAddress?: string;
+  };
+}
+
+/** HTTP API: create / join room response. */
 export interface CreateRoomResponse {
   roomId: string;
   inviteCode: string;
   gameType: GameType;
   maxPlayers: number;
   colyseusRoomId: string;
+  /** Required to connect — do not call joinById with only the room id. */
+  reservation: ColyseusSeatReservation;
 }
 
 /** HTTP API: join-by-code lookup (minimal leak). */

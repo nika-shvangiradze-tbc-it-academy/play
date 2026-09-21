@@ -13,6 +13,7 @@ import { authenticateToken, AuthError, type AuthProfile } from '../auth/verify-t
 import {
   createMatchRecord,
   completeMatchIdempotent,
+  clearColyseusRoomIdIfMatch,
   ensureRoomMembership,
   markPlayerLeft,
   setPlayerReady,
@@ -59,19 +60,38 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     this.state.hostUserId = options.hostUserId;
     this.state.maxPlayers = options.maxPlayers;
     this.state.phase = RoomPhase.WAITING;
-    // Exactly catalog max (Nardi = 2). matchMaker.createRoom does not consume a client slot.
+    // Exactly catalog max (Nardi = 2). Empty createRoom alone does NOT hold a seat.
     this.maxClients = options.maxPlayers;
     this.autoDispose = true;
 
-    // Short reservation window so abandoned join attempts do not lock the 2nd seat.
-    this.setSeatReservationTime(20);
+    // Private: not joinable via public joinOrCreate — only via invite + reserved seat.
+    void this.setPrivate(true);
+
+    /**
+     * Seat reservation TTL (seconds). Constructor already scheduled autoDispose with the
+     * default; setSeatReservationTime alone does not reschedule. Creating via
+     * reserveSeatFor() holds reservedSeats so the room cannot dispose until the
+     * reservation expires or is consumed.
+     */
+    this.setSeatReservationTime(45);
 
     this.onMessage('intent', (client, message: ClientMessage) => {
       void this.handleIntent(client, message);
     });
 
-    if (isDev()) {
-      console.log(`[room] created ${this.roomId} invite=${options.inviteCode} game=${options.gameType}`);
+    console.log(`[nardi:onCreate] roomId=${this.roomId}`);
+  }
+
+  override async onDispose(): Promise<void> {
+    console.log(
+      `[nardi:onDispose] roomId=${this.roomId} clients=${this.clients.length}`,
+    );
+    if (this.state.dbRoomId) {
+      try {
+        await clearColyseusRoomIdIfMatch(this.state.dbRoomId, this.roomId);
+      } catch (err) {
+        console.error('[nardi:onDispose] failed to clear colyseus_room_id', err);
+      }
     }
   }
 

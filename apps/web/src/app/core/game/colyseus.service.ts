@@ -4,6 +4,7 @@ import {
   ClientIntent,
   ServerEvent,
   type ClientMessage,
+  type ColyseusSeatReservation,
   type MoveCheckerMessage,
 } from '@georgian-games/shared';
 import { environment } from '../../../environments/environment';
@@ -78,30 +79,42 @@ export class ColyseusService {
     return v.phase === 'PLAYING' && v.currentTurn === seat.seatNumber;
   });
 
-  async joinById(colyseusRoomId: string): Promise<void> {
-    if (!colyseusRoomId) {
-      throw new Error('Missing Colyseus room id from server');
+  /**
+   * Consume a server-issued Colyseus 0.15 seat reservation exactly once.
+   * Do not call joinById with only a room id — empty rooms auto-dispose without a reservation.
+   */
+  async consumeReservation(reservation: ColyseusSeatReservation): Promise<void> {
+    if (!reservation?.sessionId || !reservation?.room?.roomId) {
+      throw new Error('Missing Colyseus seat reservation from server');
     }
 
-    // Already on this room — do not tear down / rejoin (avoids CLOSING race).
+    const colyseusRoomId = reservation.room.roomId;
+
     if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
-      console.info('[colyseus] joinById skipped — already connected', colyseusRoomId);
+      console.info('[colyseus] consumeReservation skipped — already connected', colyseusRoomId);
       return;
     }
 
     if (this.joinInFlight) {
-      console.info('[colyseus] joinById waiting for in-flight join');
+      console.info('[colyseus] consumeReservation waiting for in-flight join');
       await this.joinInFlight;
       if (this.room && this.room.roomId === colyseusRoomId && this.connected()) {
         return;
       }
     }
 
-    console.info('[colyseus] joinById', colyseusRoomId, 'via', environment.gameServerWsUrl);
+    console.info(
+      '[client:create] attempting joinById/consumeSeatReservation',
+      colyseusRoomId,
+      'session',
+      reservation.sessionId,
+      'via',
+      environment.gameServerWsUrl,
+    );
     this.joinAttempts.update((n) => n + 1);
 
-    const run = this.connect(async (token) =>
-      this.client.joinById(colyseusRoomId, { accessToken: token }),
+    const run = this.connect(async () =>
+      this.client.consumeSeatReservation(reservation),
     );
     this.joinInFlight = run.finally(() => {
       this.joinInFlight = null;
@@ -129,9 +142,8 @@ export class ColyseusService {
     }
   }
 
-  private async connect(factory: (token: string) => Promise<Room>): Promise<void> {
-    const token = this.auth.accessToken();
-    if (!token) throw new Error('Not authenticated');
+  private async connect(factory: () => Promise<Room>): Promise<void> {
+    if (!this.auth.accessToken()) throw new Error('Not authenticated');
 
     const epoch = ++this.joinEpoch;
     this.connecting.set(true);
@@ -141,7 +153,7 @@ export class ColyseusService {
       if (epoch !== this.joinEpoch) {
         throw new Error('Join superseded');
       }
-      const room = await this.withTimeout(factory(token), 30_000, 'WebSocket join');
+      const room = await this.withTimeout(factory(), 30_000, 'WebSocket join');
       if (epoch !== this.joinEpoch) {
         try {
           await room.leave(false);

@@ -11,6 +11,7 @@ import { matchMaker } from '@colyseus/core';
 import { authenticateToken, AuthError } from '../auth/verify-token.js';
 import {
   abandonOrphanRoom,
+  clearColyseusRoomIdIfMatch,
   createGameRoom,
   evaluateJoinOccupancy,
   getRoomOccupancy,
@@ -22,6 +23,7 @@ import { getEnv } from '../config/env.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import type { RoomMetadata } from '../rooms/BaseGameRoom.js';
 import { TimeoutError, withTimeout } from './with-timeout.js';
+import { isRoomNotFoundError, toClientReservation } from './seat-reservation.js';
 
 /** Bound external awaits so POST /api/rooms can never stay pending forever. */
 function timeoutMs(envKey: string, fallback: number): number {
@@ -112,10 +114,14 @@ function matchMakerReady(): boolean {
 }
 
 /**
- * Create Colyseus room on this process only (single-node Render).
- * Avoids IPC to a stale processId from presence stats, which can stall createRoom.
+ * Create private Nardi room + reserve creator seat (Colyseus 0.15).
+ * Empty createRoom alone auto-disposes; reserveSeatFor keeps the room alive
+ * until the client consumes the reservation (or the seat TTL expires).
  */
-async function createLocalColyseusRoom(metadata: RoomMetadata) {
+async function createPrivateRoomWithCreatorSeat(
+  metadata: RoomMetadata,
+  accessToken: string,
+) {
   try {
     matchMaker.getHandler('nardi');
   } catch {
@@ -126,11 +132,16 @@ async function createLocalColyseusRoom(metadata: RoomMetadata) {
       `Colyseus matchMaker not READY (state=${String(matchMaker.state)}); was gameServer.listen() awaited?`,
     );
   }
-  // Prefer local handleCreateRoom when available — skips selectProcessId / IPC.
-  if (typeof matchMaker.handleCreateRoom === 'function') {
-    return matchMaker.handleCreateRoom('nardi', metadata);
-  }
-  return matchMaker.createRoom('nardi', metadata);
+
+  const listing =
+    typeof matchMaker.handleCreateRoom === 'function'
+      ? await matchMaker.handleCreateRoom('nardi', metadata)
+      : await matchMaker.createRoom('nardi', metadata);
+
+  const reservation = await matchMaker.reserveSeatFor(listing, {
+    accessToken,
+  });
+  return reservation;
 }
 
 export function createApiRouter(): Router {
@@ -214,35 +225,42 @@ export function createApiRouter(): Router {
         maxPlayers: created.maxPlayers,
       };
 
-      console.log('[rooms:create] creating Colyseus room');
-      const room = await withTimeout(
-        createLocalColyseusRoom(metadata),
+      console.log('[rooms:create] creating Colyseus room + creator seat reservation');
+      const accessToken = (req as AuthedRequest).accessToken;
+      const reservation = await withTimeout(
+        createPrivateRoomWithCreatorSeat(metadata, accessToken),
         COLYSEUS_TIMEOUT_MS(),
-        'matchMaker.createRoom',
+        'matchMaker.create+reserveSeatFor',
       );
-      const live = matchMaker.getRoomById(room.roomId) as
-        | { clients?: { length: number } }
+      const colyseusRoomId = reservation.room.roomId;
+      const live = matchMaker.getRoomById(colyseusRoomId) as unknown as
+        | { clients?: { length: number }; reservedSeats?: Record<string, unknown> }
         | undefined;
       const clientCount = live?.clients?.length ?? 0;
+      const reservedCount = live?.reservedSeats
+        ? Object.keys(live.reservedSeats).length
+        : 0;
       console.log(
-        `[rooms:create] Colyseus room created clients=${clientCount}/${created.maxPlayers}`,
+        `[rooms:create] colyseus roomId=${colyseusRoomId} clients=${clientCount}/${created.maxPlayers} reserved=${reservedCount}`,
       );
 
       await withTimeout(
-        setColyseusRoomId(created.roomId, room.roomId),
+        setColyseusRoomId(created.roomId, colyseusRoomId),
         DB_TIMEOUT_MS(),
         'setColyseusRoomId',
       );
 
+      const clientReservation = toClientReservation(reservation);
       console.log(
-        `[rooms:create] sending response elapsedMs=${Date.now() - startedAt} dbRoomId=${created.roomId} colyseusRoomId=${room.roomId}`,
+        `[rooms:create] sending response elapsedMs=${Date.now() - startedAt} dbRoomId=${created.roomId} colyseusRoomId=${colyseusRoomId} sessionId=${clientReservation.sessionId}`,
       );
       respondOnce(res, 201, {
         roomId: created.roomId,
         inviteCode: created.inviteCode,
         gameType: created.gameType,
         maxPlayers: created.maxPlayers,
-        colyseusRoomId: room.roomId,
+        colyseusRoomId,
+        reservation: clientReservation,
       });
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
@@ -325,9 +343,9 @@ export function createApiRouter(): Router {
     }
   });
 
-  /** Validate invite + occupancy, then return Colyseus room id for joinById.
-   * Membership is NOT inserted here — Colyseus onJoin is authoritative for guests
-   * so a failed WebSocket join cannot permanently consume a seat.
+  /**
+   * Validate invite + occupancy, then reserve a Colyseus seat in the SAME room.
+   * Membership is applied in onJoin (idempotent). Client must consume the reservation.
    */
   router.post('/rooms/join', requireAuth, async (req, res) => {
     try {
@@ -350,6 +368,7 @@ export function createApiRouter(): Router {
       }
 
       const profile = (req as AuthedRequest).profile;
+      const accessToken = (req as AuthedRequest).accessToken;
       const occupancyCheck = evaluateJoinOccupancy(
         room.memberIds,
         room.maxPlayers,
@@ -364,34 +383,23 @@ export function createApiRouter(): Router {
       );
 
       if (
-        room.status === RoomStatus.PLAYING ||
-        room.status === RoomStatus.STARTING
-      ) {
-        if (occupancyCheck.alreadyMember && room.colyseusRoomId) {
-          // Reconnect path for a seated player after match start.
-          res.json({
-            roomId: room.id,
-            inviteCode: room.inviteCode,
-            gameType: room.gameType,
-            colyseusRoomId: room.colyseusRoomId,
-            maxPlayers: room.maxPlayers,
-          });
-          return;
-        }
-        res.status(409).json({
-          code: ErrorCode.GAME_ALREADY_STARTED,
-          message: 'Game already started',
-          colyseusRoomId: room.colyseusRoomId,
-        });
-        return;
-      }
-
-      if (
         room.status === RoomStatus.FINISHED ||
         room.status === RoomStatus.ABANDONED ||
         room.status === RoomStatus.CANCELLED
       ) {
         res.status(410).json({ code: ErrorCode.ROOM_CLOSED, message: 'Room closed' });
+        return;
+      }
+
+      if (
+        (room.status === RoomStatus.PLAYING || room.status === RoomStatus.STARTING) &&
+        !occupancyCheck.alreadyMember
+      ) {
+        res.status(409).json({
+          code: ErrorCode.GAME_ALREADY_STARTED,
+          message: 'Game already started',
+          colyseusRoomId: room.colyseusRoomId,
+        });
         return;
       }
 
@@ -401,7 +409,10 @@ export function createApiRouter(): Router {
       }
 
       if (!room.colyseusRoomId) {
-        res.status(503).json({ code: ErrorCode.SERVER_ERROR, message: 'Room not ready' });
+        res.status(410).json({
+          code: ErrorCode.ROOM_CLOSED,
+          message: 'This table is no longer available. Ask the host to create a new one.',
+        });
         return;
       }
 
@@ -413,19 +424,62 @@ export function createApiRouter(): Router {
         `[rooms:join] colyseus room=${room.colyseusRoomId} clients=${clientCount}/${room.maxPlayers}`,
       );
 
-      // Soft check against live Colyseus capacity (does not insert DB rows).
-      if (!occupancyCheck.alreadyMember && live?.hasReachedMaxClients?.()) {
+      if (!live) {
+        await clearColyseusRoomIdIfMatch(room.id, room.colyseusRoomId);
+        res.status(410).json({
+          code: ErrorCode.ROOM_CLOSED,
+          message: 'This table expired before you could join. Ask the host to create a new one.',
+        });
+        return;
+      }
+
+      if (!occupancyCheck.alreadyMember && live.hasReachedMaxClients?.()) {
         res.status(409).json({ code: ErrorCode.ROOM_FULL, message: 'Room is full' });
         return;
       }
 
-      console.log('[rooms:join] reservation created');
+      let reservation;
+      try {
+        reservation = await withTimeout(
+          matchMaker.joinById(room.colyseusRoomId, { accessToken }),
+          COLYSEUS_TIMEOUT_MS(),
+          'matchMaker.joinById',
+        );
+      } catch (err) {
+        console.error(
+          `[rooms:join] Colyseus reserve failed name=${safeErrorName(err)} message=${safeErrorMessage(err)}`,
+        );
+        if (isRoomNotFoundError(err)) {
+          await clearColyseusRoomIdIfMatch(room.id, room.colyseusRoomId);
+          res.status(410).json({
+            code: ErrorCode.ROOM_CLOSED,
+            message: 'This table is no longer available. Ask the host to create a new one.',
+          });
+          return;
+        }
+        if (err instanceof TimeoutError) {
+          res.status(504).json({ code: ErrorCode.SERVER_ERROR, message: 'Join timed out' });
+          return;
+        }
+        const msg = safeErrorMessage(err);
+        if (/full/i.test(msg)) {
+          res.status(409).json({ code: ErrorCode.ROOM_FULL, message: 'Room is full' });
+          return;
+        }
+        throw err;
+      }
+
+      const clientReservation = toClientReservation(reservation);
+      console.log(
+        `[rooms:join] reservation created sessionId=${clientReservation.sessionId} room=${clientReservation.room.roomId}`,
+      );
       res.json({
         roomId: room.id,
         inviteCode: room.inviteCode,
         gameType: room.gameType,
         colyseusRoomId: room.colyseusRoomId,
         maxPlayers: room.maxPlayers,
+        reservation: clientReservation,
       });
     } catch (err) {
       console.error('[POST /rooms/join]', err);

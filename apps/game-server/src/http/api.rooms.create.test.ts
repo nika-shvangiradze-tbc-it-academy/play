@@ -11,6 +11,8 @@ const MatchMakerState = {
 
 const handleCreateRoom = vi.fn();
 const createRoom = vi.fn();
+const reserveSeatFor = vi.fn();
+const joinById = vi.fn();
 const getHandler = vi.fn(() => ({}));
 const getRoomById = vi.fn();
 
@@ -22,6 +24,8 @@ vi.mock('@colyseus/core', () => ({
     getHandler,
     handleCreateRoom,
     createRoom,
+    reserveSeatFor,
+    joinById,
     getRoomById,
   },
 }));
@@ -73,10 +77,12 @@ describe('POST /api/rooms bounded response', () => {
     getRoomOccupancy.mockReset();
     handleCreateRoom.mockReset();
     createRoom.mockReset();
+    reserveSeatFor.mockReset();
+    joinById.mockReset();
     getHandler.mockReset();
     getRoomById.mockReset();
     getHandler.mockReturnValue({});
-    getRoomById.mockReturnValue({ clients: [] });
+    getRoomById.mockReturnValue({ clients: [], reservedSeats: { s1: true } });
     getRoomOccupancy.mockResolvedValue({
       memberIds: ['user-1'],
       totalRows: 1,
@@ -97,6 +103,15 @@ describe('POST /api/rooms bounded response', () => {
     });
     setColyseusRoomId.mockResolvedValue(undefined);
     abandonOrphanRoom.mockResolvedValue(undefined);
+    handleCreateRoom.mockResolvedValue({
+      roomId: 'coly-1',
+      name: 'nardi',
+      processId: 'test-process',
+    });
+    reserveSeatFor.mockResolvedValue({
+      sessionId: 'sess-1',
+      room: { roomId: 'coly-1', name: 'nardi', processId: 'test-process' },
+    });
   });
 
   afterEach(() => {
@@ -140,7 +155,6 @@ describe('POST /api/rooms bounded response', () => {
   }
 
   it('returns 201 when auth, DB, and Colyseus succeed', async () => {
-    handleCreateRoom.mockResolvedValue({ roomId: 'coly-1' });
     const { baseUrl, close } = await startApp();
     try {
       const res = await fetch(`${baseUrl}/api/rooms`, {
@@ -152,9 +166,16 @@ describe('POST /api/rooms bounded response', () => {
         body: JSON.stringify({ gameType: GameType.NARDI }),
       });
       expect(res.status).toBe(201);
-      const body = (await res.json()) as { colyseusRoomId: string; inviteCode: string };
+      const body = (await res.json()) as {
+        colyseusRoomId: string;
+        inviteCode: string;
+        reservation: { sessionId: string; room: { roomId: string } };
+      };
       expect(body.colyseusRoomId).toBe('coly-1');
       expect(body.inviteCode).toBe('ABC123');
+      expect(body.reservation.sessionId).toBe('sess-1');
+      expect(body.reservation.room.roomId).toBe('coly-1');
+      expect(reserveSeatFor).toHaveBeenCalled();
       expect(abandonOrphanRoom).not.toHaveBeenCalled();
     } finally {
       await close();

@@ -45,11 +45,16 @@ export class LobbyPage {
         environment.gameServerWsUrl,
       );
       const room = await this.api.createRoom(GameType.NARDI);
-      if (!room?.colyseusRoomId) {
-        throw new Error('Server created the table but returned no Colyseus room id');
+      if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
+        throw new Error('Server created the table but returned no seat reservation');
       }
-      console.info('[lobby] createTable → join Colyseus', room.colyseusRoomId);
-      await this.colyseus.joinById(room.colyseusRoomId);
+      console.info(
+        '[client:create] attempting joinById=',
+        room.reservation.room.roomId,
+        'session',
+        room.reservation.sessionId,
+      );
+      await this.colyseus.consumeReservation(room.reservation);
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[lobby] createTable failed', err);
@@ -70,11 +75,16 @@ export class LobbyPage {
     try {
       console.info('[lobby] joinTable → POST /api/rooms/join', code);
       const room = await this.api.joinByCode(code);
-      if (!room?.colyseusRoomId) {
-        throw new Error('Server accepted the join but returned no Colyseus room id');
+      if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
+        throw new Error('Server accepted the join but returned no seat reservation');
       }
-      console.info('[lobby] joinTable → join Colyseus', room.colyseusRoomId);
-      await this.colyseus.joinById(room.colyseusRoomId);
+      console.info(
+        '[client:create] attempting joinById=',
+        room.reservation.room.roomId,
+        'session',
+        room.reservation.sessionId,
+      );
+      await this.colyseus.consumeReservation(room.reservation);
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[lobby] joinTable failed', err);
