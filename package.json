@@ -13,6 +13,8 @@
     "build:shared": "npm run build -w @georgian-games/shared",
     "build:server": "npm run build -w @georgian-games/game-server",
     "build:web": "npm run build -w @georgian-games/web",
+    "start:server": "npm run start -w @georgian-games/game-server",
+    "startserver": "npm run start:server",
     "test": "npm run test -w @georgian-games/shared && npm run test -w @georgian-games/game-server",
     "test:shared": "npm run test -w @georgian-games/shared",
     "test:server": "npm run test -w @georgian-games/game-server",
