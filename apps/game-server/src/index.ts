@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
-import { Server } from '@colyseus/core';
+import { Server, matchMaker } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { getEnv, isDev, logSupabaseKeyConfigOnce } from './config/env.js';
 import { createCorsOptions } from './config/cors.js';
@@ -23,6 +23,8 @@ async function main(): Promise<void> {
     // Required so seat reservations advertise the public host clients actually use.
     ...(env.PUBLIC_ADDRESS ? { publicAddress: env.PUBLIC_ADDRESS } : {}),
     transport: new WebSocketTransport({ server: httpServer }),
+    // Single-node: always create rooms on this process (skip presence IPC selection).
+    selectProcessIdToCreateRoom: async () => matchMaker.processId,
   });
 
   gameServer.define('nardi', NardiRoom);
@@ -31,6 +33,11 @@ async function main(): Promise<void> {
   // Calling httpServer.listen alone leaves matchmaking half-initialized.
   await gameServer.listen(env.PORT);
   console.log(`[game-server] listening on :${env.PORT}`);
+  console.log(
+    `[game-server] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId} nardi=${
+      matchMaker.getHandler('nardi') ? 'yes' : 'no'
+    }`,
+  );
   if (env.PUBLIC_ADDRESS) {
     console.log(`[game-server] publicAddress=${env.PUBLIC_ADDRESS}`);
   }

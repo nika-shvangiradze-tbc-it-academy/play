@@ -78,6 +78,20 @@ export async function setColyseusRoomId(roomId: string, colyseusRoomId: string):
   }
 }
 
+/**
+ * Best-effort cleanup when Colyseus room creation fails after the DB row exists.
+ * Deletes the incomplete room (and cascaded seats) so invite codes are not left half-created.
+ * Avoids setting finished_at — schema requires started_at first.
+ */
+export async function abandonOrphanRoom(roomId: string): Promise<void> {
+  const supabase = getAdminClient();
+  const { error } = await supabase.from('game_rooms').delete().eq('id', roomId);
+  if (error) {
+    console.error('[rooms] abandonOrphanRoom delete failed', roomId, error.message);
+    throw new Error(`Failed to abandon orphan room: ${error.message}`);
+  }
+}
+
 export interface RoomLookup {
   id: string;
   inviteCode: string;
