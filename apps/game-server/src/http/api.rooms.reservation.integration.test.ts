@@ -270,6 +270,60 @@ describe('Colyseus seat reservation lifecycle', () => {
     await guestRoom.leave(true);
   }, 30_000);
 
+  it('production timing: create → consume → wait 20s → still alive → guest join → clients=2', async () => {
+    members.clear();
+    createdColyseusId = undefined;
+
+    const createRes = await fetch(`${baseUrl}/api/rooms`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${hostToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ gameType: GameType.NARDI }),
+    });
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as {
+      colyseusRoomId: string;
+      lifecycleTraceId?: string;
+      reservation: { sessionId: string; room: { roomId: string; processId: string; publicAddress?: string } };
+    };
+    expect(created.lifecycleTraceId).toBeTruthy();
+    expect(created.reservation.room.processId).toBeTruthy();
+
+    const hostClient = new ColyseusClient(wsUrl);
+    const hostRoom = await hostClient.consumeSeatReservation(created.reservation);
+    expect(matchMaker.getRoomById(created.colyseusRoomId)?.clients.length).toBe(1);
+
+    // Survive longer than old aggressive ping window and typical "immediate join" window.
+    await new Promise((r) => setTimeout(r, 20_000));
+    expect(matchMaker.getRoomById(created.colyseusRoomId)).toBeTruthy();
+    expect(matchMaker.getRoomById(created.colyseusRoomId)?.clients.length).toBe(1);
+
+    members.set('db-res-1', [hostToken]);
+    const joinRes = await fetch(`${baseUrl}/api/rooms/join`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${guestToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ inviteCode: 'ABCDEF' }),
+    });
+    expect(joinRes.status).toBe(200);
+    const joined = (await joinRes.json()) as {
+      colyseusRoomId: string;
+      reservation: { sessionId: string; room: { roomId: string } };
+    };
+    expect(joined.colyseusRoomId).toBe(created.colyseusRoomId);
+
+    const guestClient = new ColyseusClient(wsUrl);
+    const guestRoom = await guestClient.consumeSeatReservation(joined.reservation);
+    expect(matchMaker.getRoomById(created.colyseusRoomId)?.clients.length).toBe(2);
+
+    await hostRoom.leave(true);
+    await guestRoom.leave(true);
+  }, 45_000);
+
   it('B/E: creator remains connected while waiting (socket stays open)', async () => {
     members.clear();
     createdColyseusId = undefined;

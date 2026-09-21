@@ -37,15 +37,17 @@ export class GameSessionService {
    */
   async enterWithReservation(
     reservation: ColyseusSeatReservation,
-    meta: Omit<ActiveGameSession, 'colyseusRoomId'>,
+    meta: Omit<ActiveGameSession, 'colyseusRoomId'> & { lifecycleTraceId?: string },
   ): Promise<void> {
     if (!reservation?.sessionId || !reservation?.room?.roomId) {
       throw new Error('Missing Colyseus seat reservation from server');
     }
 
+    const trace = meta.lifecycleTraceId ?? 'none';
+
     if (this.consumedSessionIds.has(reservation.sessionId)) {
       console.info(
-        '[client:create] duplicate consume prevented session=',
+        `[trace:${trace}] CLIENT duplicate consume prevented session=`,
         reservation.sessionId.slice(0, 8),
       );
       if (
@@ -53,7 +55,10 @@ export class GameSessionService {
         this.colyseus.currentRoomId() === reservation.room.roomId
       ) {
         this.meta.set({
-          ...meta,
+          dbRoomId: meta.dbRoomId,
+          inviteCode: meta.inviteCode,
+          gameType: meta.gameType,
+          role: meta.role,
           colyseusRoomId: reservation.room.roomId,
         });
         return;
@@ -61,32 +66,27 @@ export class GameSessionService {
       throw new Error('Seat reservation was already used. Create or join again.');
     }
 
-    console.info(
-      '[client:create] consuming reservation roomId=',
-      reservation.room.roomId,
-      'session=',
-      reservation.sessionId.slice(0, 8),
-    );
-
     this.consumedSessionIds.add(reservation.sessionId);
     try {
-      await this.colyseus.consumeReservation(reservation);
+      await this.colyseus.consumeReservation(reservation, {
+        lifecycleTraceId: meta.lifecycleTraceId,
+      });
     } catch (err) {
       this.consumedSessionIds.delete(reservation.sessionId);
       throw err;
     }
 
+    if (!this.colyseus.socketOpen()) {
+      throw new Error('Creator WebSocket is not OPEN — refusing to show a live invite');
+    }
+
     this.meta.set({
-      ...meta,
+      dbRoomId: meta.dbRoomId,
+      inviteCode: meta.inviteCode,
+      gameType: meta.gameType,
+      role: meta.role,
       colyseusRoomId: reservation.room.roomId,
     });
-
-    console.info(
-      '[client:create] reservation consumed roomId=',
-      reservation.room.roomId,
-      'socketOpen=',
-      this.colyseus.socketOpen(),
-    );
   }
 
   ready(): void {

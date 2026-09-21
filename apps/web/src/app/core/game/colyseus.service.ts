@@ -88,23 +88,34 @@ export class ColyseusService {
   /**
    * Consume a server-issued Colyseus 0.15 seat reservation exactly once.
    * Do not call joinById with only a room id — empty rooms auto-dispose without a reservation.
+   * Resolves only after Room exists, socket is OPEN, and synced state includes our seat (onJoin).
    */
-  async consumeReservation(reservation: ColyseusSeatReservation): Promise<void> {
+  async consumeReservation(
+    reservation: ColyseusSeatReservation,
+    opts?: { lifecycleTraceId?: string },
+  ): Promise<void> {
     if (!reservation?.sessionId || !reservation?.room?.roomId) {
       throw new Error('Missing Colyseus seat reservation from server');
     }
 
+    const trace = opts?.lifecycleTraceId ?? 'none';
     const colyseusRoomId = reservation.room.roomId;
+    const expectedWs = this.buildSanitizedWsEndpoint(reservation);
+
+    console.info(`[trace:${trace}] CLIENT reservation received roomId=${colyseusRoomId}`);
+    console.info(
+      `[trace:${trace}] CLIENT expected WS endpoint=${expectedWs} (clientBase=${environment.gameServerWsUrl})`,
+    );
 
     if (this.room && this.room.roomId === colyseusRoomId && this.isRoomSocketOpen(this.room)) {
-      console.info('[colyseus] consumeReservation skipped — already connected', colyseusRoomId);
+      console.info(`[trace:${trace}] CLIENT consume skipped — already connected`);
       this.connected.set(true);
       this.socketOpen.set(true);
       return;
     }
 
     if (this.joinInFlight) {
-      console.info('[colyseus] consumeReservation waiting for in-flight join');
+      console.info(`[trace:${trace}] CLIENT waiting for in-flight join`);
       await this.joinInFlight;
       if (this.room && this.room.roomId === colyseusRoomId && this.isRoomSocketOpen(this.room)) {
         this.connected.set(true);
@@ -113,21 +124,70 @@ export class ColyseusService {
       }
     }
 
-    console.info(
-      '[client:create] attempting consumeSeatReservation',
-      colyseusRoomId,
-      'session',
-      reservation.sessionId.slice(0, 8),
-      'via',
-      environment.gameServerWsUrl,
-    );
+    console.info(`[trace:${trace}] CLIENT consumeSeatReservation begin`);
     this.joinAttempts.update((n) => n + 1);
 
-    const run = this.connect(async () => this.client.consumeSeatReservation(reservation));
+    const run = this.connect(async () => this.client.consumeSeatReservation(reservation), trace);
     this.joinInFlight = run.finally(() => {
       this.joinInFlight = null;
     });
     await this.joinInFlight;
+
+    await this.assertLiveCreatorConnection(trace);
+  }
+
+  /** Reconstruct the same URL shape Colyseus 0.15.57 Client.buildEndpoint uses (no secrets). */
+  private buildSanitizedWsEndpoint(reservation: ColyseusSeatReservation): string {
+    const room = reservation.room;
+    const base = environment.gameServerWsUrl;
+    const secure = base.startsWith('wss');
+    const proto = secure ? 'wss://' : 'ws://';
+    let hostPart: string;
+    if (room.publicAddress) {
+      hostPart = room.publicAddress;
+    } else {
+      try {
+        const u = new URL(base.replace(/^ws/, 'http'));
+        hostPart = u.host + (u.pathname === '/' ? '' : u.pathname.replace(/\/$/, ''));
+      } catch {
+        hostPart = base.replace(/^wss?:\/\//, '');
+      }
+    }
+    return `${proto}${hostPart}/${room.processId}/${room.roomId}?sessionId=${reservation.sessionId.slice(0, 8)}…`;
+  }
+
+  private async assertLiveCreatorConnection(trace: string): Promise<void> {
+    const room = this.room;
+    if (!room) {
+      throw new Error('Seat reservation consumed but no Room object was retained');
+    }
+    if (!room.connection) {
+      throw new Error('Room exists but connection object is missing');
+    }
+    if (!this.isRoomSocketOpen(room)) {
+      throw new Error('WebSocket is not OPEN after consumeSeatReservation');
+    }
+
+    const uid = this.auth.user()?.id;
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      this.syncFromState(room);
+      this.socketOpen.set(this.isRoomSocketOpen(room));
+      const seats = this.view()?.seats ?? [];
+      const hasSeat = uid ? seats.some((s) => s.userId === uid && s.connected) : seats.length > 0;
+      if (hasSeat && this.isRoomSocketOpen(room)) {
+        console.info(
+          `[trace:${trace}] CLIENT consume success socketOpen=true seats=${seats.length} roomId=${room.roomId}`,
+        );
+        this.connected.set(true);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    throw new Error(
+      'Connected to Colyseus but server onJoin/seat sync did not arrive — table is not live',
+    );
   }
 
   private isRoomSocketOpen(room: Room): boolean {
@@ -159,7 +219,7 @@ export class ColyseusService {
     }
   }
 
-  private async connect(factory: () => Promise<Room>): Promise<void> {
+  private async connect(factory: () => Promise<Room>, trace = 'none'): Promise<void> {
     if (!this.auth.accessToken()) throw new Error('Not authenticated');
 
     const epoch = ++this.joinEpoch;
@@ -170,12 +230,14 @@ export class ColyseusService {
       // Only detach a *different* live room. Never leave(false) a socket we are
       // about to keep — WAITING rooms autoDispose on empty.
       if (this.room) {
+        console.info(`[trace:${trace}] CLIENT replacing existing room via detachCurrentRoom`);
         await this.detachCurrentRoom(/* consented */ false);
       }
       if (epoch !== this.joinEpoch) {
         throw new Error('Join superseded');
       }
       joined = await this.withTimeout(factory(), 30_000, 'WebSocket join');
+      console.info(`[trace:${trace}] CLIENT WS open roomId=${joined.roomId}`);
       if (epoch !== this.joinEpoch) {
         try {
           await joined.leave(false);
@@ -190,15 +252,9 @@ export class ColyseusService {
       this.socketOpen.set(this.isRoomSocketOpen(joined));
       this.bindRoom(joined);
       this.syncFromState(joined);
-      console.info(
-        '[client:create] reservation consumed roomId=',
-        joined.roomId,
-        'socketOpen=',
-        this.socketOpen(),
-      );
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Connection failed';
-      console.error('[colyseus] connect failed', err);
+      console.error(`[trace:${trace}] CLIENT connect failed`, err);
       this.lastError.set(message);
       this.connected.set(false);
       this.socketOpen.set(false);

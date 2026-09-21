@@ -49,4 +49,6 @@ export class GameRoomState extends Schema {
   @type('number') off1: number = 0;
   @type({ map: SeatSchema }) seats = new MapSchema<SeatSchema>();
   @type([LegalMoveSchema]) legalMoves = new ArraySchema<LegalMoveSchema>();
+  /** Correlates server+client logs for one create→join lifecycle (non-secret). */
+  @type('string') lifecycleTraceId: string = '';
 }

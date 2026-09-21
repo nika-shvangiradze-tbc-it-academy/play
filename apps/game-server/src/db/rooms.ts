@@ -198,6 +198,35 @@ export async function lookupRoomByInviteCode(inviteCode: string): Promise<RoomLo
   };
 }
 
+/** Lookup by primary key — used by authenticated room debug endpoint. */
+export async function lookupRoomById(roomId: string): Promise<RoomLookup | null> {
+  const supabase = getAdminClient();
+  const { data: room, error } = await supabase
+    .from('game_rooms')
+    .select('id, invite_code, game_type, status, max_players, host_user_id, colyseus_room_id')
+    .eq('id', roomId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Room lookup failed: ${error.message}`);
+  }
+  if (!room) return null;
+
+  const occupancy = await getRoomOccupancy(room.id as string);
+
+  return {
+    id: room.id as string,
+    inviteCode: room.invite_code as string,
+    gameType: room.game_type as GameType,
+    status: room.status as RoomStatus,
+    maxPlayers: room.max_players as number,
+    hostUserId: room.host_user_id as string,
+    colyseusRoomId: (room.colyseus_room_id as string | null) ?? null,
+    seatsTaken: occupancy.distinctCount,
+    memberIds: occupancy.memberIds,
+  };
+}
+
 /**
  * Idempotent membership upsert — Colyseus onJoin is the authority for guests.
  * Safe to call on every join/reconnect; never creates duplicate active rows.

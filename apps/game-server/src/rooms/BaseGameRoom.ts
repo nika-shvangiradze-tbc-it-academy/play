@@ -22,6 +22,7 @@ import {
 } from '../db/rooms.js';
 import { getEnv, isDev } from '../config/env.js';
 import { GameRoomState, SeatSchema } from './schema/GameRoomState.js';
+import { processIdentity, shortId, traceLog } from '../http/lifecycle-trace.js';
 
 export interface RoomMetadata {
   dbRoomId: string;
@@ -29,6 +30,8 @@ export interface RoomMetadata {
   gameType: GameType;
   hostUserId: string;
   maxPlayers: number;
+  /** Correlates create→join→dispose logs across HTTP and Colyseus. */
+  lifecycleTraceId: string;
 }
 
 interface PlayerSession {
@@ -59,6 +62,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     this.state.gameType = options.gameType;
     this.state.hostUserId = options.hostUserId;
     this.state.maxPlayers = options.maxPlayers;
+    this.state.lifecycleTraceId = options.lifecycleTraceId || '';
     this.state.phase = RoomPhase.WAITING;
     // Exactly catalog max (Nardi = 2). Empty createRoom alone does NOT hold a seat.
     this.maxClients = options.maxPlayers;
@@ -79,15 +83,21 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       void this.handleIntent(client, message);
     });
 
-    console.log(`[nardi:onCreate] roomId=${this.roomId}`);
+    const tid = options.lifecycleTraceId || 'none';
+    traceLog(tid, `onCreate roomId=${this.roomId}`);
   }
 
   override async onDispose(): Promise<void> {
-    console.log(
-      `[nardi:onDispose] roomId=${this.roomId} clients=${this.clients.length}`,
+    const tid = this.state.lifecycleTraceId || this.roomMeta?.lifecycleTraceId || 'none';
+    const reserved = Object.keys(this.reservedSeats ?? {}).length;
+    const { pid, processId } = processIdentity();
+    traceLog(
+      tid,
+      `onDispose roomId=${this.roomId} clients=${this.clients.length} reservedSeats=${reserved} phase=${this.state.phase} processId=${processId} pid=${pid}`,
     );
     if (this.state.dbRoomId) {
       try {
+        traceLog(tid, `DB clearing colyseus_room_id because=onDispose roomId=${this.roomId}`);
         await clearColyseusRoomIdIfMatch(this.state.dbRoomId, this.roomId);
       } catch (err) {
         console.error('[nardi:onDispose] failed to clear colyseus_room_id', err);
@@ -96,10 +106,12 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
   }
 
   override async onAuth(client: Client, options: { accessToken?: string }): Promise<AuthProfile> {
+    const tid = this.state.lifecycleTraceId || this.roomMeta?.lifecycleTraceId || 'none';
     try {
       const hasToken = typeof options?.accessToken === 'string' && options.accessToken.length > 0;
-      console.log(
-        `[nardi:onAuth] roomId=${this.roomId} session=${client.sessionId?.slice(0, 8) ?? '?'} hasToken=${hasToken}`,
+      traceLog(
+        tid,
+        `onAuth begin session=${shortId(client.sessionId)} hasToken=${hasToken}`,
       );
       if (!hasToken) {
         throw new AuthError(ErrorCode.UNAUTHENTICATED, 'Missing access token');
@@ -119,15 +131,11 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
         }
       }
 
-      console.log(
-        `[nardi:onAuth] ok user=${shortUserId(profile.userId)} roomId=${this.roomId}`,
-      );
+      traceLog(tid, `onAuth success user=${shortUserId(profile.userId)}`);
       return profile;
     } catch (err) {
       if (err instanceof AuthError) {
-        console.warn(
-          `[nardi:onAuth] rejected roomId=${this.roomId} code=${err.code} message=${err.message}`,
-        );
+        traceLog(tid, `onAuth rejected code=${err.code} message=${err.message}`);
         throw err;
       }
       console.error('[auth] unexpected', err);
@@ -170,6 +178,10 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       console.log(
         `[nardi:onJoin] roomId=${this.roomId} user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=true`,
       );
+      traceLog(
+        this.state.lifecycleTraceId || 'none',
+        `onJoin user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=true`,
+      );
       return;
     }
 
@@ -205,25 +217,39 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
     console.log(
       `[nardi:onJoin] roomId=${this.roomId} user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=false`,
     );
+    traceLog(
+      this.state.lifecycleTraceId || 'none',
+      `onJoin user=${shortUserId(auth.userId)} clients=${this.clients.length}/${this.maxClients} reconnect=false`,
+    );
   }
 
   override async onLeave(client: Client, consented: boolean): Promise<void> {
+    const tid = this.state.lifecycleTraceId || this.roomMeta?.lifecycleTraceId || 'none';
     const session = this.sessions.get(client.sessionId);
-    if (!session) return;
+    if (!session) {
+      traceLog(tid, `onLeave entered session=? consented=${consented} (no session map entry)`);
+      return;
+    }
 
     const seat = this.state.seats.get(String(session.seatNumber));
-    if (!seat) return;
+    if (!seat) {
+      traceLog(
+        tid,
+        `onLeave entered user=${shortUserId(session.userId)} consented=${consented} (no seat)`,
+      );
+      return;
+    }
 
-    console.log(
-      `[nardi:onLeave] roomId=${this.roomId} user=${shortUserId(session.userId)} clients=${Math.max(0, this.clients.length - 1)}/${this.maxClients} consented=${consented}`,
+    traceLog(
+      tid,
+      `onLeave entered user=${shortUserId(session.userId)} consented=${consented} clientsBeforeDecrement=${this.clients.length}`,
     );
 
     /**
      * Waiting lobby:
      * - Consented leave: free the seat immediately (empty room auto-disposes).
-     * - Accidental disconnect: short reconnect hold so a dropped creator WS does not
-     *   instantly wipe the invite. Reconnect seats do not call _incrementClientCount;
-     *   with clients=0 + 1 reconnect reservation, a guest can still reserve.
+     * - Accidental disconnect: await allowReconnection so onLeave does not return
+     *   (and _decrementClientCount does not run) until reconnect or grace timeout.
      */
     if (!this.matchStarted && this.state.phase === RoomPhase.WAITING) {
       if (consented) {
@@ -231,6 +257,7 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
         this.sessions.delete(client.sessionId);
         this.userToSession.delete(session.userId);
         await markPlayerLeft(this.state.dbRoomId, session.userId);
+        traceLog(tid, `onLeave returning (WAITING consented — seat freed)`);
         return;
       }
 
@@ -244,17 +271,23 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
         graceMsRemaining: waitingGraceMs,
       });
 
+      const graceSec = waitingGraceMs / 1000;
+      traceLog(tid, `allowReconnection begin seconds=${graceSec}`);
       try {
-        await this.allowReconnection(client, waitingGraceMs / 1000);
+        // Must await — Colyseus 0.15 holds disposal until this promise settles.
+        await this.allowReconnection(client, graceSec);
         seat.connected = true;
         seat.reconnecting = false;
+        traceLog(tid, `allowReconnection resolved (reconnect success)`);
       } catch {
         seat.reconnecting = false;
         this.state.seats.delete(String(session.seatNumber));
         this.sessions.delete(client.sessionId);
         this.userToSession.delete(session.userId);
         await markPlayerLeft(this.state.dbRoomId, session.userId);
+        traceLog(tid, `allowReconnection rejected (timeout/fail) — seat freed`);
       }
+      traceLog(tid, `onLeave returning (WAITING unconsented path complete)`);
       return;
     }
 
@@ -270,14 +303,19 @@ export abstract class BaseGameRoom extends Room<GameRoomState> {
       graceMsRemaining: grace,
     });
 
+    const graceSec = grace / 1000;
+    traceLog(tid, `allowReconnection begin (in-match) seconds=${graceSec}`);
     try {
-      await this.allowReconnection(client, grace / 1000);
+      await this.allowReconnection(client, graceSec);
       seat.connected = true;
       seat.reconnecting = false;
+      traceLog(tid, `allowReconnection resolved (in-match reconnect success)`);
     } catch {
       seat.reconnecting = false;
       await this.handleAbandonment(session.userId, session.seatNumber);
+      traceLog(tid, `allowReconnection rejected (in-match) — abandonment`);
     }
+    traceLog(tid, `onLeave returning (in-match path complete)`);
   }
 
   protected async handleAbandonment(userId: string, seatNumber: number): Promise<void> {

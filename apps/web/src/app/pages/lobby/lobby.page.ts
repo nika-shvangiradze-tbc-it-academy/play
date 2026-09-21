@@ -56,6 +56,7 @@ export class LobbyPage {
         inviteCode: room.inviteCode,
         gameType: room.gameType,
         role: 'host',
+        lifecycleTraceId: room.lifecycleTraceId,
       });
       if (!this.session.socketOpen()) {
         throw new Error('Connected to the table but the WebSocket closed immediately');
@@ -91,6 +92,7 @@ export class LobbyPage {
         inviteCode: room.inviteCode,
         gameType: room.gameType,
         role: 'guest',
+        lifecycleTraceId: room.lifecycleTraceId,
       });
       if (!this.session.socketOpen()) {
         throw new Error('Joined the table but the WebSocket closed immediately');

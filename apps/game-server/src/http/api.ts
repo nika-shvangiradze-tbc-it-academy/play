@@ -14,16 +14,16 @@ import {
   clearColyseusRoomIdIfMatch,
   createGameRoom,
   evaluateJoinOccupancy,
-  getRoomOccupancy,
+  lookupRoomById,
   lookupRoomByInviteCode,
   setColyseusRoomId,
-  shortUserId,
 } from '../db/rooms.js';
 import { getEnv } from '../config/env.js';
 import { RateLimiter } from '../security/rate-limiter.js';
 import type { RoomMetadata } from '../rooms/BaseGameRoom.js';
 import { TimeoutError, withTimeout } from './with-timeout.js';
 import { isRoomNotFoundError, toClientReservation } from './seat-reservation.js';
+import { newLifecycleTraceId, shortId, traceLog } from './lifecycle-trace.js';
 
 /** Bound external awaits so POST /api/rooms can never stay pending forever. */
 function timeoutMs(envKey: string, fallback: number): number {
@@ -165,8 +165,9 @@ export function createApiRouter(): Router {
   router.post('/rooms', requireAuth, async (req, res) => {
     let dbRoomId: string | undefined;
     const startedAt = Date.now();
+    const lifecycleTraceId = newLifecycleTraceId();
     try {
-      console.log('[rooms:create] request received');
+      traceLog(lifecycleTraceId, 'HTTP CREATE begin');
 
       if (!createRoomLimiter.tryRemoveToken(clientKey(req))) {
         respondOnce(res, 429, {
@@ -176,9 +177,7 @@ export function createApiRouter(): Router {
         return;
       }
 
-      console.log('[rooms:create] auth complete');
       const profile = (req as AuthedRequest).profile;
-      console.log('[rooms:create] profile loaded');
 
       const gameType = req.body?.gameType as GameType | undefined;
       const entry = gameType ? getGameCatalogEntry(gameType) : undefined;
@@ -197,24 +196,20 @@ export function createApiRouter(): Router {
       } catch {
         nardiRegistered = false;
       }
-      console.log(
-        `[rooms:create] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId ?? 'none'} pid=${process.pid} nardi=${nardiRegistered}`,
+      traceLog(
+        lifecycleTraceId,
+        `matchMaker state=${String(matchMaker.state)} nardi=${nardiRegistered}`,
       );
 
-      console.log('[rooms:create] creating database room');
       const created = await withTimeout(
         createGameRoom(profile.userId, gameType!),
         DB_TIMEOUT_MS(),
         'createGameRoom',
       );
       dbRoomId = created.roomId;
-      const occupancy = await withTimeout(
-        getRoomOccupancy(created.roomId),
-        DB_TIMEOUT_MS(),
-        'getRoomOccupancy',
-      );
-      console.log(
-        `[rooms:create] database room created members=${occupancy.totalRows} distinct=${occupancy.distinctCount}`,
+      traceLog(
+        lifecycleTraceId,
+        `DB room created id=${shortId(created.roomId, 8)} invite=${created.inviteCode}`,
       );
 
       const metadata: RoomMetadata = {
@@ -223,9 +218,9 @@ export function createApiRouter(): Router {
         gameType: created.gameType,
         hostUserId: profile.userId,
         maxPlayers: created.maxPlayers,
+        lifecycleTraceId,
       };
 
-      console.log('[rooms:create] creating Colyseus room + creator seat reservation');
       const accessToken = (req as AuthedRequest).accessToken;
       const reservation = await withTimeout(
         createPrivateRoomWithCreatorSeat(metadata, accessToken),
@@ -240,14 +235,13 @@ export function createApiRouter(): Router {
       const reservedCount = live?.reservedSeats
         ? Object.keys(live.reservedSeats).length
         : 0;
-      console.log(
-        `[rooms:create] room created roomId=${colyseusRoomId} processId=${matchMaker.processId} pid=${process.pid}`,
+      traceLog(
+        lifecycleTraceId,
+        `Colyseus room created id=${colyseusRoomId} publicAddress=${reservation.room.publicAddress ?? 'none'}`,
       );
-      console.log(
-        `[rooms:create] creator reservation sessionId=${String(reservation.sessionId).slice(0, 8)}`,
-      );
-      console.log(
-        `[rooms:create] reservedSeats=${reservedCount} clients=${clientCount}/${created.maxPlayers}`,
+      traceLog(
+        lifecycleTraceId,
+        `creator seat reserved session=${shortId(String(reservation.sessionId))} reservedSeats=${reservedCount} clients=${clientCount}`,
       );
 
       await withTimeout(
@@ -257,8 +251,9 @@ export function createApiRouter(): Router {
       );
 
       const clientReservation = toClientReservation(reservation);
-      console.log(
-        `[rooms:create] sending response elapsedMs=${Date.now() - startedAt} dbRoomId=${created.roomId} colyseusRoomId=${colyseusRoomId} sessionId=${clientReservation.sessionId}`,
+      traceLog(
+        lifecycleTraceId,
+        `reservation returned to client roomId=${clientReservation.room.roomId} processId=${clientReservation.room.processId} publicAddress=${clientReservation.room.publicAddress ?? 'none'} elapsedMs=${Date.now() - startedAt}`,
       );
       respondOnce(res, 201, {
         roomId: created.roomId,
@@ -266,12 +261,13 @@ export function createApiRouter(): Router {
         gameType: created.gameType,
         maxPlayers: created.maxPlayers,
         colyseusRoomId,
+        lifecycleTraceId,
         reservation: clientReservation,
       });
     } catch (err) {
       const elapsedMs = Date.now() - startedAt;
       console.error(
-        `[rooms:create] failed elapsedMs=${elapsedMs} dbRoomId=${dbRoomId ?? 'none'} name=${safeErrorName(err)} message=${safeErrorMessage(err)}`,
+        `[trace:${lifecycleTraceId}] HTTP CREATE failed elapsedMs=${elapsedMs} dbRoomId=${dbRoomId ?? 'none'} name=${safeErrorName(err)} message=${safeErrorMessage(err)}`,
       );
       if (err instanceof Error && err.stack) {
         console.error('[rooms:create] stack', err.stack);
@@ -350,10 +346,67 @@ export function createApiRouter(): Router {
   });
 
   /**
+   * Temporary authenticated diagnostic — non-sensitive room liveness snapshot.
+   * Lets us inspect User A's room before User B joins.
+   */
+  router.get('/rooms/:roomId/debug', requireAuth, async (req, res) => {
+    try {
+      const roomId = String(req.params['roomId'] ?? '');
+      if (!roomId || roomId.length < 8) {
+        res.status(400).json({ code: ErrorCode.FORBIDDEN, message: 'Invalid room id' });
+        return;
+      }
+
+      const room = await lookupRoomById(roomId);
+      if (!room) {
+        res.status(404).json({ code: ErrorCode.INVALID_INVITE_CODE, message: 'Room not found' });
+        return;
+      }
+
+      const profile = (req as AuthedRequest).profile;
+      const isMember = room.memberIds.includes(profile.userId);
+      const isHost = room.hostUserId === profile.userId;
+      if (!isMember && !isHost) {
+        res.status(403).json({ code: ErrorCode.FORBIDDEN, message: 'Not a member of this room' });
+        return;
+      }
+
+      const live = room.colyseusRoomId
+        ? (matchMaker.getRoomById(room.colyseusRoomId) as unknown as
+            | {
+                clients?: { length: number };
+                maxClients?: number;
+                reservedSeats?: Record<string, unknown>;
+                state?: { lifecycleTraceId?: string; phase?: string };
+              }
+            | undefined)
+        : undefined;
+      const reservedSeatCount = live?.reservedSeats ? Object.keys(live.reservedSeats).length : 0;
+
+      res.json({
+        dbStatus: room.status,
+        colyseusRoomId: room.colyseusRoomId,
+        matchMakerFound: !!live,
+        clients: live?.clients?.length ?? 0,
+        maxClients: live?.maxClients ?? room.maxPlayers,
+        reservedSeatCount,
+        processId: matchMaker.processId,
+        pid: process.pid,
+        lifecycleTraceId: live?.state?.lifecycleTraceId ?? null,
+        phase: live?.state?.phase ?? null,
+      });
+    } catch (err) {
+      console.error('[GET /rooms/:roomId/debug]', err);
+      res.status(500).json({ code: ErrorCode.SERVER_ERROR, message: 'Debug lookup failed' });
+    }
+  });
+
+  /**
    * Validate invite + occupancy, then reserve a Colyseus seat in the SAME room.
    * Membership is applied in onJoin (idempotent). Client must consume the reservation.
    */
   router.post('/rooms/join', requireAuth, async (req, res) => {
+    const joinTrace = newLifecycleTraceId();
     try {
       if (!joinRoomLimiter.tryRemoveToken(`join:${clientKey(req)}`)) {
         res.status(429).json({ code: ErrorCode.RATE_LIMITED, message: 'Too many join attempts' });
@@ -361,7 +414,7 @@ export function createApiRouter(): Router {
       }
 
       const code = normalizeInviteCode(String(req.body?.inviteCode ?? ''));
-      console.log(`[rooms:join] invite=${code || '(empty)'}`);
+      traceLog(joinTrace, `HTTP JOIN begin invite=${code || '(empty)'}`);
       if (!isValidInviteCodeFormat(code)) {
         res.status(400).json({ code: ErrorCode.INVALID_INVITE_CODE, message: 'Invalid invite code' });
         return;
@@ -381,11 +434,9 @@ export function createApiRouter(): Router {
         profile.userId,
       );
 
-      console.log(
-        `[rooms:join] db members=${room.seatsTaken} distinct=${occupancyCheck.distinctCount}`,
-      );
-      console.log(
-        `[rooms:join] requesting user alreadyMember=${occupancyCheck.alreadyMember} user=${shortUserId(profile.userId)}`,
+      traceLog(
+        joinTrace,
+        `DB room=${shortId(room.id)} members=${room.seatsTaken} alreadyMember=${occupancyCheck.alreadyMember}`,
       );
 
       if (
@@ -415,6 +466,7 @@ export function createApiRouter(): Router {
       }
 
       if (!room.colyseusRoomId) {
+        traceLog(joinTrace, 'DB colyseusRoomId=null → ROOM_CLOSED');
         res.status(410).json({
           code: ErrorCode.ROOM_CLOSED,
           message: 'This table is no longer available. Ask the host to create a new one.',
@@ -422,18 +474,30 @@ export function createApiRouter(): Router {
         return;
       }
 
-      const live = matchMaker.getRoomById(room.colyseusRoomId) as
-        | { clients?: { length: number }; hasReachedMaxClients?: () => boolean }
+      const live = matchMaker.getRoomById(room.colyseusRoomId) as unknown as
+        | {
+            clients?: { length: number };
+            hasReachedMaxClients?: () => boolean;
+            reservedSeats?: Record<string, unknown>;
+            state?: { lifecycleTraceId?: string };
+          }
         | undefined;
       const clientCount = live?.clients?.length ?? 0;
+      const reservedSeatCount = live?.reservedSeats ? Object.keys(live.reservedSeats).length : 0;
       const matchMakerFound = !!live;
-      console.log(`[rooms:join] dbRoom=${room.id}`);
-      console.log(`[rooms:join] colyseusRoomId=${room.colyseusRoomId}`);
-      console.log(
-        `[rooms:join] matchMakerFound=${matchMakerFound} processId=${matchMaker.processId} pid=${process.pid} clients=${clientCount}/${room.maxPlayers}`,
+      const roomTrace = live?.state?.lifecycleTraceId || joinTrace;
+      traceLog(roomTrace, `HTTP JOIN dbRoom=${shortId(room.id)} invite=${code}`);
+      traceLog(roomTrace, `DB colyseusRoomId=${room.colyseusRoomId}`);
+      traceLog(
+        roomTrace,
+        `matchMakerFound=${matchMakerFound} clients=${clientCount} reservedSeats=${reservedSeatCount}`,
       );
 
       if (!live) {
+        traceLog(
+          roomTrace,
+          `DB clearing colyseus_room_id because=join_matchMaker_miss colyseusRoomId=${room.colyseusRoomId}`,
+        );
         await clearColyseusRoomIdIfMatch(room.id, room.colyseusRoomId);
         res.status(410).json({
           code: ErrorCode.ROOM_CLOSED,
@@ -456,9 +520,13 @@ export function createApiRouter(): Router {
         );
       } catch (err) {
         console.error(
-          `[rooms:join] Colyseus reserve failed name=${safeErrorName(err)} message=${safeErrorMessage(err)}`,
+          `[trace:${roomTrace}] Colyseus reserve failed name=${safeErrorName(err)} message=${safeErrorMessage(err)}`,
         );
         if (isRoomNotFoundError(err)) {
+          traceLog(
+            roomTrace,
+            `DB clearing colyseus_room_id because=joinById_room_not_found`,
+          );
           await clearColyseusRoomIdIfMatch(room.id, room.colyseusRoomId);
           res.status(410).json({
             code: ErrorCode.ROOM_CLOSED,
@@ -479,8 +547,9 @@ export function createApiRouter(): Router {
       }
 
       const clientReservation = toClientReservation(reservation);
-      console.log(
-        `[rooms:join] reservation created sessionId=${clientReservation.sessionId} room=${clientReservation.room.roomId}`,
+      traceLog(
+        roomTrace,
+        `guest reservation created session=${shortId(clientReservation.sessionId)} room=${clientReservation.room.roomId}`,
       );
       res.json({
         roomId: room.id,
@@ -488,6 +557,7 @@ export function createApiRouter(): Router {
         gameType: room.gameType,
         colyseusRoomId: room.colyseusRoomId,
         maxPlayers: room.maxPlayers,
+        lifecycleTraceId: roomTrace,
         reservation: clientReservation,
       });
     } catch (err) {

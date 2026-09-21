@@ -45,9 +45,11 @@ async function main(): Promise<void> {
   // Must use gameServer.listen so matchMaker.accept() runs (IPC / READY state).
   // Calling httpServer.listen alone leaves matchmaking half-initialized.
   await gameServer.listen(env.PORT);
-  console.log(`[game-server] listening on :${env.PORT} pid=${process.pid}`);
   console.log(
-    `[game-server] matchMaker state=${String(matchMaker.state)} processId=${matchMaker.processId} nardi=${
+    `[startup] pid=${process.pid} processId=${matchMaker.processId} port=${env.PORT}`,
+  );
+  console.log(
+    `[game-server] matchMaker state=${String(matchMaker.state)} nardi=${
       matchMaker.getHandler('nardi') ? 'yes' : 'no'
     }`,
   );

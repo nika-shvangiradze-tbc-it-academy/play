@@ -97,6 +97,8 @@ export interface CreateRoomResponse {
   colyseusRoomId: string;
   /** Required to connect — do not call joinById with only the room id. */
   reservation: ColyseusSeatReservation;
+  /** Correlates browser + Render logs for one room lifecycle. */
+  lifecycleTraceId?: string;
 }
 
 /** HTTP API: join-by-code lookup (minimal leak). */
