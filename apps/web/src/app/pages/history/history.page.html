@@ -1,33 +1,33 @@
 <section class="history">
   <header>
-    <h1>Match history</h1>
-    <p>Your completed and abandoned matches.</p>
+    <h1>მატჩების ისტორია</h1>
+    <p>შენი დასრულებული და შეწყვეტილი მატჩები.</p>
   </header>
 
   @if (loading()) {
-    <p class="muted">Loading…</p>
+    <p class="muted">იტვირთება…</p>
   } @else if (error()) {
     <p class="error-text">{{ error() }}</p>
   } @else if (items().length === 0) {
-    <p class="muted">No matches yet. Create a Nardi table to get started.</p>
+    <p class="muted">მატჩები ჯერ არ არის. დაიწყე ნარდის მაგიდის შექმნით.</p>
   } @else {
     <div class="list">
       @for (entry of items(); track entry.match_id) {
         <article class="panel row">
           <div>
-            <h2>{{ entry.game_type }}</h2>
+            <h2>{{ gameTypeLabel(entry.game_type) }}</h2>
             <p class="date">{{ formatDate(entry.started_at) }}</p>
           </div>
           <div>
-            <p class="label">Opponents</p>
+            <p class="label">მოწინააღმდეგეები</p>
             <p>{{ opponentsLabel(entry) }}</p>
           </div>
           <div>
-            <p class="label">Result</p>
-            <p class="result">{{ entry.result }}</p>
+            <p class="label">შედეგი</p>
+            <p class="result">{{ resultLabel(entry.result) }}</p>
           </div>
           <div>
-            <p class="label">Score</p>
+            <p class="label">ანგარიში</p>
             <p>{{ entry.score ?? '—' }}</p>
           </div>
         </article>
@@ -35,9 +35,9 @@
     </div>
 
     <div class="pager">
-      <button type="button" class="btn btn-ghost" [disabled]="page() <= 1" (click)="prev()">Previous</button>
-      <span>Page {{ page() }}</span>
-      <button type="button" class="btn btn-ghost" [disabled]="!hasMore()" (click)="next()">Next</button>
+      <button type="button" class="btn btn-ghost" [disabled]="page() <= 1" (click)="prev()">წინა</button>
+      <span>გვერდი {{ page() }}</span>
+      <button type="button" class="btn btn-ghost" [disabled]="!hasMore()" (click)="next()">შემდეგი</button>
     </div>
   }
 </section>

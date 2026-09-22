@@ -4,32 +4,32 @@
   <section class="waiting panel">
     <header class="waiting-head">
       <div>
-        <p class="eyebrow">{{ view()?.gameType?.toUpperCase() || 'NARDI' }}</p>
-        <h1>Waiting room</h1>
+        <p class="eyebrow">ნარდი</p>
+        <h1>მოლოდინის ოთახი</h1>
       </div>
       <div class="code-block">
-        <span class="code-label">Room</span>
+        <span class="code-label">ოთახი</span>
         <strong class="code">{{ view()?.inviteCode || inviteCode() }}</strong>
         <button type="button" class="btn btn-ghost" (click)="copyCode()" [disabled]="!socketOpen()">
-          {{ copied() ? 'Copied' : 'Copy Code' }}
+          {{ copied() ? 'დაკოპირებულია' : 'კოდის კოპირება' }}
         </button>
       </div>
     </header>
 
     @if (!socketOpen()) {
       <p class="error-text">
-        Connection lost — this table is no longer joinable. Return to the lobby and create a new one.
+        კავშირი გაწყდა — ეს მაგიდა აღარ არის ხელმისაწვდომი. დაბრუნდი ლობიში და შექმენი ახალი.
       </p>
     }
 
     <div class="seats">
       @for (i of [0, 1]; track i) {
         <article class="seat" [class.filled]="seatPresent(i)" [class.ready]="seatReady(i)">
-          <p class="seat-label">Player {{ i + 1 }}</p>
+          <p class="seat-label">მოთამაშე {{ i + 1 }}</p>
           <h2>{{ seatLabel(i) }}</h2>
           <p class="seat-status">{{ seatStatus(i) }}</p>
           @if (isHost() && i === 0) {
-            <span class="host-tag">Host</span>
+            <span class="host-tag">მასპინძელი</span>
           }
         </article>
       }
@@ -41,11 +41,11 @@
 
     <div class="actions">
       <button type="button" class="btn btn-primary" (click)="toggleReady()" [disabled]="!mySeat()">
-        {{ mySeat()?.isReady ? 'Unready' : 'Ready' }}
+        {{ mySeat()?.isReady ? 'მზადყოფნის გაუქმება' : 'მზად ვარ' }}
       </button>
-      <button type="button" class="btn btn-danger" (click)="leave()">Leave table</button>
+      <button type="button" class="btn btn-danger" (click)="leave()">მაგიდიდან გასვლა</button>
     </div>
 
-    <p class="hint">Match starts automatically when both players are ready.</p>
+    <p class="hint">მატჩი ავტომატურად დაიწყება, როცა ორივე მოთამაშე მზად იქნება.</p>
   </section>
 }

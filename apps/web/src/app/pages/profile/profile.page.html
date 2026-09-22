@@ -8,24 +8,24 @@
       </div>
       <div class="info">
         <h1>{{ p.username }}</h1>
-        <p class="joined">Joined {{ p.created_at | date: 'mediumDate' }}</p>
+        <p class="joined">შემოუერთდა {{ p.created_at | date: 'mediumDate' }}</p>
         <div class="stats">
-          <div><span>Played</span><strong>{{ p.games_played }}</strong></div>
-          <div><span>Wins</span><strong>{{ p.games_won }}</strong></div>
-          <div><span>Losses</span><strong>{{ losses() }}</strong></div>
-          <div><span>Win rate</span><strong>{{ winRate() }}</strong></div>
+          <div><span>ნათამაშები</span><strong>{{ p.games_played }}</strong></div>
+          <div><span>მოგებები</span><strong>{{ p.games_won }}</strong></div>
+          <div><span>წაგებები</span><strong>{{ losses() }}</strong></div>
+          <div><span>მოგების %</span><strong>{{ winRate() }}</strong></div>
         </div>
       </div>
     </div>
 
     <form class="panel edit" (ngSubmit)="save()">
-      <h2>Edit profile</h2>
+      <h2>პროფილის რედაქტირება</h2>
       <div class="field">
-        <label for="username">Username</label>
+        <label for="username">მომხმარებლის სახელი</label>
         <input id="username" name="username" [(ngModel)]="username" maxlength="20" />
       </div>
       <div class="field">
-        <label for="avatar">Avatar URL</label>
+        <label for="avatar">ავატარის ბმული</label>
         <input id="avatar" name="avatar" [(ngModel)]="avatarUrl" placeholder="https://…" />
       </div>
       @if (error()) {
@@ -34,9 +34,9 @@
       @if (success()) {
         <p class="success-text">{{ success() }}</p>
       }
-      <button class="btn btn-primary" type="submit" [disabled]="busy()">Save</button>
+      <button class="btn btn-primary" type="submit" [disabled]="busy()">შენახვა</button>
     </form>
   } @else {
-    <p class="muted">Loading profile…</p>
+    <p class="muted">პროფილი იტვირთება…</p>
   }
 </section>

@@ -1,15 +1,15 @@
 <section class="hero">
   <div class="hero-copy">
-    <p class="eyebrow">Georgian table classics</p>
+    <p class="eyebrow">ქართული სამაგიდო კლასიკა</p>
     <h1>გართობა</h1>
     <p class="tagline">იღბალი. ოსტატობა. გამარჯვება.</p>
-    <p class="sub">Create a private table, invite your friends and play live.</p>
+    <p class="sub">შექმენი პირადი მაგიდა, მოიწვიე მეგობრები და ითამაშე ცოცხლად.</p>
     <div class="cta-row">
       @if (auth.isAuthenticated()) {
-        <a routerLink="/lobby" class="btn btn-primary">Play Now</a>
+        <a routerLink="/lobby" class="btn btn-primary">ითამაშე ახლა</a>
       } @else {
-        <a routerLink="/register" class="btn btn-primary">Play Now</a>
-        <a routerLink="/login" class="btn btn-ghost">I have an account</a>
+        <a routerLink="/register" class="btn btn-primary">ითამაშე ახლა</a>
+        <a routerLink="/login" class="btn btn-ghost">უკვე მაქვს ანგარიში</a>
       }
     </div>
   </div>

@@ -19,9 +19,9 @@
           <span class="game-name">ნარდი</span>
           <span class="game-legend">ვეფხისტყაოსანი</span>
         </div>
-        <span class="room-code" title="Invite code">{{ v.inviteCode }}</span>
+        <span class="room-code" title="მოწვევის კოდი">{{ v.inviteCode }}</span>
         <span class="conn" [class.ok]="colyseus.connected() || !!previewView()">
-          {{ previewView() ? 'Preview' : (colyseus.connected() ? 'Live' : 'Reconnecting…') }}
+          {{ previewView() ? 'გადახედვა' : (colyseus.connected() ? 'ცოცხალი' : 'ხელახალი დაკავშირება…') }}
         </span>
       </div>
       <p class="status">{{ statusText() }}</p>
@@ -34,7 +34,7 @@
           >
             <span>{{ seat.username }}</span>
             @if (seat.reconnecting) {
-              <small>disconnected</small>
+              <small>გათიშულია</small>
             }
           </div>
         }
@@ -43,8 +43,8 @@
           class="expand-btn"
           (click)="toggleExpanded()"
           [attr.aria-pressed]="expanded()"
-          [attr.aria-label]="expanded() ? 'Exit expanded board' : 'Expand board'"
-          [attr.title]="expanded() ? 'Exit expanded view' : 'Expand board'"
+          [attr.aria-label]="expanded() ? 'გაფართოებული დაფიდან გასვლა' : 'დაფის გაფართოება'"
+          [attr.title]="expanded() ? 'გაფართოებული ხედიდან გასვლა' : 'დაფის გაფართოება'"
         >
           @if (expanded()) {
             <svg class="expand-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -117,7 +117,7 @@
                   [class.bar-p1]="seat === 1"
                   type="button"
                   (click)="onBarClick(seat)"
-                  [attr.aria-label]="(seat === 0 ? 'White' : 'Dark') + ' captured checkers'"
+                  [attr.aria-label]="(seat === 0 ? 'თეთრის' : 'შავის') + ' დატყვევებული ქვები'"
                   [style.--stack-size.px]="barStackLayout(barCount(seat)).size"
                   [style.--stack-step.px]="barStackLayout(barCount(seat)).step"
                   [style.--stack-visible]="barStackLayout(barCount(seat)).visible"
@@ -262,16 +262,16 @@
                 [class.landing-c]="v.turnNumber % 3 === 2"
                 role="status"
                 aria-live="polite"
-                [attr.aria-label]="'Dice roll: ' + v.dice.d1 + ' and ' + v.dice.d2"
+                [attr.aria-label]="'კამათლის გაგორება: ' + v.dice.d1 + ' და ' + v.dice.d2"
               >
-                <span class="thrown-die die-one" [attr.aria-label]="'Die ' + v.dice.d1">
+                <span class="thrown-die die-one" [attr.aria-label]="'კამათელი ' + v.dice.d1">
                   <span class="die-face" aria-hidden="true">
                     @for (slot of dicePips(v.dice.d1); track slot) {
                       <i class="die-pip" [class]="'die-pip pip-' + slot"></i>
                     }
                   </span>
                 </span>
-                <span class="thrown-die die-two" [attr.aria-label]="'Die ' + v.dice.d2">
+                <span class="thrown-die die-two" [attr.aria-label]="'კამათელი ' + v.dice.d2">
                   <span class="die-face" aria-hidden="true">
                     @for (slot of dicePips(v.dice.d2); track slot) {
                       <i class="die-pip" [class]="'die-pip pip-' + slot"></i>
@@ -293,7 +293,7 @@
             aria-hidden="true"
           ></span>
           <span class="off-name">{{ playerName(localSeatNumber()) }}</span>
-          <strong>Off {{ offCount(localSeatNumber()) }}</strong>
+          <strong>გასული {{ offCount(localSeatNumber()) }}</strong>
         </div>
 
         <div class="dice-area">
@@ -304,10 +304,10 @@
             (pointerdown)="onRollPointerDown()"
             (click)="roll()"
           >
-            Roll Dice
+            კამათლის გაგორება
           </button>
           <button type="button" class="btn btn-ghost bear-off-btn" [disabled]="!canBearOff()" (click)="bearOff()">
-            Bear off
+            გამოტანა
           </button>
         </div>
 
@@ -319,7 +319,7 @@
             aria-hidden="true"
           ></span>
           <span class="off-name">{{ playerName(opponentSeatNumber()) }}</span>
-          <strong>Off {{ offCount(opponentSeatNumber()) }}</strong>
+          <strong>გასული {{ offCount(opponentSeatNumber()) }}</strong>
         </div>
       </div>
     </div>
@@ -329,7 +329,7 @@
     }
 
     <p class="help">
-      Select a highlighted checker, then a glowing destination. Dice and legality are decided by the server.
+      აირჩიე მონიშნული ქვა, შემდეგ განათებული სამიზნე. კამათელსა და სისწორეს სერვერი განსაზღვრავს.
     </p>
   </section>
 }

@@ -40,7 +40,7 @@ export class GameSessionService {
     meta: Omit<ActiveGameSession, 'colyseusRoomId'> & { lifecycleTraceId?: string },
   ): Promise<void> {
     if (!reservation?.sessionId || !reservation?.room?.roomId) {
-      throw new Error('Missing Colyseus seat reservation from server');
+      throw new Error('სერვერიდან ადგილის რეზერვაცია აკლია');
     }
 
     const trace = meta.lifecycleTraceId ?? 'none';
@@ -63,7 +63,7 @@ export class GameSessionService {
         });
         return;
       }
-      throw new Error('Seat reservation was already used. Create or join again.');
+      throw new Error('ადგილი უკვე გამოყენებულია. შექმენი ან შეუერთდი ხელახლა.');
     }
 
     this.consumedSessionIds.add(reservation.sessionId);
@@ -77,7 +77,7 @@ export class GameSessionService {
     }
 
     if (!this.colyseus.socketOpen()) {
-      throw new Error('Creator WebSocket is not OPEN — refusing to show a live invite');
+      throw new Error('შემქმნელის კავშირი არ არის ღია — ცოცხალი მოწვევა ვერ გამოჩნდება');
     }
 
     this.meta.set({

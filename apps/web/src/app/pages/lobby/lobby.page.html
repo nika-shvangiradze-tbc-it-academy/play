@@ -1,7 +1,7 @@
 <section class="lobby">
   <header class="lobby-head">
-    <h1>Games</h1>
-    <p>Private tables. Invite-only. Live play.</p>
+    <h1>თამაშები</h1>
+    <p>პირადი მაგიდები. მხოლოდ მოწვევით. ცოცხალი თამაში.</p>
   </header>
 
   @if (nardiMode() === 'menu') {
@@ -12,38 +12,38 @@
             <h2>{{ game.name }}</h2>
             <p class="players">
               @if (game.minPlayers === game.maxPlayers) {
-                {{ game.maxPlayers }} Players
+                {{ game.maxPlayers }} მოთამაშე
               } @else {
-                {{ game.minPlayers }} / {{ game.maxPlayers }} Players
+                {{ game.minPlayers }} / {{ game.maxPlayers }} მოთამაშე
               }
             </p>
             <p class="desc">{{ game.description }}</p>
           </div>
           @if (game.available) {
-            <button type="button" class="btn btn-primary" (click)="selectNardi()">Play</button>
+            <button type="button" class="btn btn-primary" (click)="selectNardi()">თამაში</button>
           } @else {
-            <span class="soon-badge">Coming soon</span>
+            <span class="soon-badge">მალე</span>
           }
         </article>
       }
     </div>
   } @else {
     <div class="nardi-actions panel">
-      <button type="button" class="back" (click)="backToGames()">← All games</button>
-      <h2>Nardi</h2>
-      <p class="lead">Create a private table or join with an invite code.</p>
+      <button type="button" class="back" (click)="backToGames()">← ყველა თამაში</button>
+      <h2>ნარდი</h2>
+      <p class="lead">შექმენი პირადი მაგიდა ან შეუერთდი მოწვევის კოდით.</p>
 
       <div class="action-columns">
         <div class="action-block">
-          <h3>Create private table</h3>
+          <h3>პირადი მაგიდის შექმნა</h3>
           <button type="button" class="btn btn-primary" [disabled]="busy()" (click)="createTable()">
-            {{ busy() ? 'Creating…' : 'Create Table' }}
+            {{ busy() ? 'იქმნება…' : 'მაგიდის შექმნა' }}
           </button>
         </div>
         <div class="action-block">
-          <h3>Join private table</h3>
+          <h3>პირად მაგიდასთან მიერთება</h3>
           <div class="field">
-            <label for="code">Enter code</label>
+            <label for="code">შეიყვანე კოდი</label>
             <input
               id="code"
               name="code"
@@ -54,7 +54,7 @@
             />
           </div>
           <button type="button" class="btn btn-ghost" [disabled]="busy()" (click)="joinTable()">
-            Join
+            შესვლა
           </button>
         </div>
       </div>

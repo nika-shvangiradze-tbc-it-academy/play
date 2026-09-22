@@ -17,15 +17,15 @@
 
     @if (auth.isAuthenticated()) {
       <nav class="nav-links">
-        <a routerLink="/lobby" routerLinkActive="active">Games</a>
-        <a routerLink="/history" routerLinkActive="active">History</a>
-        <a routerLink="/profile" routerLinkActive="active">Profile</a>
+        <a routerLink="/lobby" routerLinkActive="active">თამაშები</a>
+        <a routerLink="/history" routerLinkActive="active">ისტორია</a>
+        <a routerLink="/profile" routerLinkActive="active">პროფილი</a>
       </nav>
-      <button type="button" class="btn btn-ghost nav-logout" (click)="logout()">Logout</button>
+      <button type="button" class="btn btn-ghost nav-logout" (click)="logout()">გასვლა</button>
     } @else {
       <nav class="nav-links">
-        <a routerLink="/login" routerLinkActive="active">Login</a>
-        <a routerLink="/register" class="btn btn-primary nav-cta">Sign up</a>
+        <a routerLink="/login" routerLinkActive="active">შესვლა</a>
+        <a routerLink="/register" class="btn btn-primary nav-cta">რეგისტრაცია</a>
       </nav>
     }
   </header>

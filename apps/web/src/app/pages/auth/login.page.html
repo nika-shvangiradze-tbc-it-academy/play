@@ -1,14 +1,14 @@
 <section class="auth-wrap">
   <form class="panel auth-card" (ngSubmit)="submit()">
-    <h1>Welcome back</h1>
-    <p class="lead">Sign in to create or join a private table.</p>
+    <h1>კეთილი იყოს თქვენი დაბრუნება</h1>
+    <p class="lead">შედი, რომ შექმნა ან შეუერთდე პირად მაგიდას.</p>
 
     <div class="field">
-      <label for="email">Email</label>
+      <label for="email">ელფოსტა</label>
       <input id="email" name="email" type="email" [(ngModel)]="email" required autocomplete="email" />
     </div>
     <div class="field">
-      <label for="password">Password</label>
+      <label for="password">პაროლი</label>
       <input
         id="password"
         name="password"
@@ -24,12 +24,12 @@
     }
 
     <button class="btn btn-primary" type="submit" [disabled]="busy()">
-      {{ busy() ? 'Signing in…' : 'Login' }}
+      {{ busy() ? 'შესვლა…' : 'შესვლა' }}
     </button>
 
     <p class="footer-links">
-      <a routerLink="/forgot-password">Forgot password?</a>
-      <a routerLink="/register">Create account</a>
+      <a routerLink="/forgot-password">დაგავიწყდათ პაროლი?</a>
+      <a routerLink="/register">ანგარიშის შექმნა</a>
     </p>
   </form>
 </section>

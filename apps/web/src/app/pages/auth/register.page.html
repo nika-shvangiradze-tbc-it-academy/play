@@ -1,10 +1,10 @@
 <section class="auth-wrap">
   <form class="panel auth-card" (ngSubmit)="submit()">
-    <h1>Create account</h1>
-    <p class="lead">Choose a unique username for the tables.</p>
+    <h1>ანგარიშის შექმნა</h1>
+    <p class="lead">აირჩიე უნიკალური სახელი მაგიდებისთვის.</p>
 
     <div class="field">
-      <label for="username">Username</label>
+      <label for="username">მომხმარებლის სახელი</label>
       <input
         id="username"
         name="username"
@@ -16,11 +16,11 @@
       />
     </div>
     <div class="field">
-      <label for="email">Email</label>
+      <label for="email">ელფოსტა</label>
       <input id="email" name="email" type="email" [(ngModel)]="email" required autocomplete="email" />
     </div>
     <div class="field">
-      <label for="password">Password</label>
+      <label for="password">პაროლი</label>
       <input
         id="password"
         name="password"
@@ -37,11 +37,11 @@
     }
 
     <button class="btn btn-primary" type="submit" [disabled]="busy()">
-      {{ busy() ? 'Creating…' : 'Sign up' }}
+      {{ busy() ? 'იქმნება…' : 'რეგისტრაცია' }}
     </button>
 
     <p class="footer-links">
-      <a routerLink="/login">Already have an account?</a>
+      <a routerLink="/login">უკვე გაქვს ანგარიში?</a>
     </p>
   </form>
 </section>

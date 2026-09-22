@@ -95,7 +95,7 @@ export class ColyseusService {
     opts?: { lifecycleTraceId?: string },
   ): Promise<void> {
     if (!reservation?.sessionId || !reservation?.room?.roomId) {
-      throw new Error('Missing Colyseus seat reservation from server');
+      throw new Error('სერვერიდან ადგილის რეზერვაცია აკლია');
     }
 
     const trace = opts?.lifecycleTraceId ?? 'none';
@@ -159,13 +159,13 @@ export class ColyseusService {
   private async assertLiveCreatorConnection(trace: string): Promise<void> {
     const room = this.room;
     if (!room) {
-      throw new Error('Seat reservation consumed but no Room object was retained');
+      throw new Error('ადგილი მოიხმარა, მაგრამ ოთახის ობიექტი არ შენარჩუნდა');
     }
     if (!room.connection) {
-      throw new Error('Room exists but connection object is missing');
+      throw new Error('ოთახი არსებობს, მაგრამ კავშირის ობიექტი აკლია');
     }
     if (!this.isRoomSocketOpen(room)) {
-      throw new Error('WebSocket is not OPEN after consumeSeatReservation');
+      throw new Error('კავშირი არ არის ღია ადგილის მოხმარების შემდეგ');
     }
 
     const uid = this.auth.user()?.id;
@@ -186,7 +186,7 @@ export class ColyseusService {
     }
 
     throw new Error(
-      'Connected to Colyseus but server onJoin/seat sync did not arrive — table is not live',
+      'დაკავშირება მოხდა, მაგრამ სერვერის ადგილის სინქი არ მოვიდა — მაგიდა ცოცხალი არ არის',
     );
   }
 
@@ -208,7 +208,7 @@ export class ColyseusService {
           timer = setTimeout(() => {
             reject(
               new Error(
-                `${label} timed out after ${Math.round(ms / 1000)}s. The game server may be waking up — try again.`,
+                `${label} timed out after ${Math.round(ms / 1000)}s. თამაშის სერვერი შესაძლოა იღვიძებს — სცადე ხელახლა.`,
               ),
             );
           }, ms);
@@ -220,7 +220,7 @@ export class ColyseusService {
   }
 
   private async connect(factory: () => Promise<Room>, trace = 'none'): Promise<void> {
-    if (!this.auth.accessToken()) throw new Error('Not authenticated');
+    if (!this.auth.accessToken()) throw new Error('ავტორიზაცია საჭიროა');
 
     const epoch = ++this.joinEpoch;
     this.connecting.set(true);
@@ -234,7 +234,7 @@ export class ColyseusService {
         await this.detachCurrentRoom(/* consented */ false);
       }
       if (epoch !== this.joinEpoch) {
-        throw new Error('Join superseded');
+        throw new Error('მიერთება გადაფარა სხვა მოთხოვნამ');
       }
       joined = await this.withTimeout(factory(), 30_000, 'WebSocket join');
       console.info(`[trace:${trace}] CLIENT WS open roomId=${joined.roomId}`);
@@ -245,7 +245,7 @@ export class ColyseusService {
           /* ignore */
         }
         joined = null;
-        throw new Error('Join superseded');
+        throw new Error('მიერთება გადაფარა სხვა მოთხოვნამ');
       }
       this.room = joined;
       this.connected.set(true);
@@ -253,7 +253,7 @@ export class ColyseusService {
       this.bindRoom(joined);
       this.syncFromState(joined);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Connection failed';
+      const message = err instanceof Error ? err.message : 'კავშირი ვერ დამყარდა';
       console.error(`[trace:${trace}] CLIENT connect failed`, err);
       this.lastError.set(message);
       this.connected.set(false);
@@ -288,7 +288,7 @@ export class ColyseusService {
     });
     room.onError((code, message) => {
       if (this.room !== room) return;
-      this.lastError.set(message ?? `Error ${code}`);
+      this.lastError.set(message ?? `შეცდომა ${code}`);
     });
     room.onLeave((code) => {
       if (this.room !== room) return;
@@ -303,16 +303,16 @@ export class ColyseusService {
       this.socketOpen.set(false);
       this.room = null;
       if (code !== 1000) {
-        this.lastError.set('Disconnected from room');
+        this.lastError.set('ოთახთან კავშირი გაწყდა');
       }
     });
     room.onMessage(ServerEvent.ACTION_REJECTED, (payload: { message?: string }) => {
       if (this.room !== room) return;
-      this.lastError.set(payload.message ?? 'Action rejected');
+      this.lastError.set(payload.message ?? 'მოქმედება უარყოფილია');
     });
     room.onMessage(ServerEvent.ERROR, (payload: { message?: string }) => {
       if (this.room !== room) return;
-      this.lastError.set(payload.message ?? 'Server error');
+      this.lastError.set(payload.message ?? 'სერვერის შეცდომა');
     });
   }
 

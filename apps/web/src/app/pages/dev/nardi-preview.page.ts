@@ -15,24 +15,24 @@ type PreviewScenario = 'initial' | 'stacks' | 'bar' | 'bearoff' | 'win' | 'loss'
     <div class="preview-page">
       <div class="preview-controls">
         <label>
-          Scenario
+          სცენარი
           <select [value]="scenario" (change)="onScenario($event)">
-            <option value="initial">Initial position</option>
-            <option value="stacks">Stress stacks</option>
-            <option value="bar">Bar + mid-game</option>
-            <option value="bearoff">Bearing off</option>
-            <option value="win">End — local win</option>
-            <option value="loss">End — local loss</option>
+            <option value="initial">საწყისი პოზიცია</option>
+            <option value="stacks">დატვირთული სტეკები</option>
+            <option value="bar">ბარი + შუა თამაში</option>
+            <option value="bearoff">გამოტანა</option>
+            <option value="win">დასასრული — ადგილობრივი მოგება</option>
+            <option value="loss">დასასრული — ადგილობრივი წაგება</option>
           </select>
         </label>
         <label>
-          Local seat
+          ადგილობრივი ადგილი
           <select [value]="localSeat" (change)="onSeat($event)">
-            <option value="0">White (seat 0)</option>
-            <option value="1">Dark (seat 1)</option>
+            <option value="0">თეთრი (ადგილი 0)</option>
+            <option value="1">შავი (ადგილი 1)</option>
           </select>
         </label>
-        <span class="hint">Visual QA — not a live match</span>
+        <span class="hint">ვიზუალური შემოწმება — არ არის ცოცხალი მატჩი</span>
       </div>
       <app-nardi-board />
     </div>

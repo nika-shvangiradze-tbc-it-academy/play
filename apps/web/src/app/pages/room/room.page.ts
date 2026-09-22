@@ -70,7 +70,7 @@ export class RoomPage implements OnInit, OnDestroy {
 
   seatLabel(index: number): string {
     const seats = this.view()?.seats ?? [];
-    return seats.find((s) => s.seatNumber === index)?.username ?? 'Waiting for player…';
+    return seats.find((s) => s.seatNumber === index)?.username ?? 'მოთამაშის მოლოდინი…';
   }
 
   seatReady(index: number): boolean {
@@ -84,8 +84,8 @@ export class RoomPage implements OnInit, OnDestroy {
   seatStatus(index: number): string {
     const seat = this.view()?.seats.find((s) => s.seatNumber === index);
     if (!seat) return '';
-    if (seat.reconnecting) return 'Disconnected — waiting for reconnection';
-    if (!seat.connected) return 'Offline';
-    return seat.isReady ? 'READY ✓' : 'Not ready';
+    if (seat.reconnecting) return 'გათიშულია — ხელახალი დაკავშირების მოლოდინი';
+    if (!seat.connected) return 'ოფლაინ';
+    return seat.isReady ? 'მზადაა ✓' : 'არ არის მზად';
   }
 }

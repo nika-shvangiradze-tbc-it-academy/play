@@ -11,7 +11,7 @@ export class GameApiService {
 
   private async headers(): Promise<HeadersInit> {
     const token = this.auth.accessToken();
-    if (!token) throw new Error('Not authenticated');
+    if (!token) throw new Error('ავტორიზაცია საჭიროა');
     return {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -48,7 +48,7 @@ export class GameApiService {
         const message =
           typeof body['message'] === 'string'
             ? body['message']
-            : `Request failed (${res.status})`;
+            : `მოთხოვნა ვერ შესრულდა (${res.status})`;
         console.error('[game-api]', method, path, res.status, body);
         throw new Error(message);
       }
@@ -57,15 +57,15 @@ export class GameApiService {
       if (err instanceof DOMException && err.name === 'AbortError') {
         console.error('[game-api] timeout', path, url, `elapsedMs=${Date.now() - t0}`);
         throw new Error(
-          'Game server timed out. It may be waking up — wait a few seconds and try again.',
+          'თამაშის სერვერმა დრო ამოწურა. შესაძლოა იღვიძებს — დაელოდე რამდენიმე წამს და სცადე ხელახლა.',
         );
       }
       if (err instanceof TypeError) {
         console.error('[game-api] network', path, url, err, `elapsedMs=${Date.now() - t0}`);
         const localHint = /localhost|127\.0\.0\.1/i.test(url)
-          ? ' Start the game server (repo root: npm run dev) so port 2567 is listening.'
+          ? ' გაუშვი თამაშის სერვერი (საცავის ფესვი: npm run dev), რომ პორტი 2567 იყოს მოსმენილი.'
           : '';
-        throw new Error(`Cannot reach the game server.${localHint}`);
+        throw new Error(`თამაშის სერვერზე წვდომა შეუძლებელია.${localHint}`);
       }
       throw err;
     } finally {

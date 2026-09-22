@@ -146,9 +146,9 @@ export class NardiBoardComponent {
     }
     const turnPlayer = v.seats.find((s) => s.seatNumber === v.currentTurn);
     if (v.nardiPhase === 'WAITING_FOR_ROLL') {
-      return `${turnPlayer?.username ?? 'Player'} — roll dice`;
+      return `${turnPlayer?.username ?? 'მოთამაშე'} — გააგორე კამათელი`;
     }
-    return `${turnPlayer?.username ?? 'Player'} — move`;
+    return `${turnPlayer?.username ?? 'მოთამაშე'} — გადაადგილება`;
   });
 
   readonly isMatchFinished = computed(() => {
@@ -567,7 +567,7 @@ export class NardiBoardComponent {
 
   playerName(seatNumber: number): string {
     return this.view()?.seats.find((seat) => seat.seatNumber === seatNumber)?.username
-      ?? `Player ${seatNumber + 1}`;
+      ?? `მოთამაშე ${seatNumber + 1}`;
   }
 
   async toggleExpanded(): Promise<void> {

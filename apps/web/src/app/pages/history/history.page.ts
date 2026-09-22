@@ -30,7 +30,7 @@ export class HistoryPage implements OnInit {
       this.page.set(result.page);
       this.hasMore.set(result.hasMore);
     } catch {
-      this.error.set('Could not load match history');
+      this.error.set('მატჩების ისტორია ვერ ჩაიტვირთა');
     } finally {
       this.loading.set(false);
     }
@@ -46,10 +46,30 @@ export class HistoryPage implements OnInit {
 
   formatDate(iso: string): string {
     if (!iso) return '—';
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString('ka-GE');
   }
 
   opponentsLabel(entry: MatchHistoryEntry): string {
     return entry.opponents.map((o) => o.username).join(', ') || '—';
+  }
+
+  gameTypeLabel(type: string): string {
+    const map: Record<string, string> = {
+      nardi: 'ნარდი',
+      joker: 'ჯოკერი',
+      domino: 'დომინო',
+      bura: 'ბურა',
+    };
+    return map[type.toLowerCase()] ?? type;
+  }
+
+  resultLabel(result: string): string {
+    const map: Record<string, string> = {
+      win: 'მოგება',
+      loss: 'წაგება',
+      draw: 'ფრე',
+      abandoned: 'შეწყვეტილი',
+    };
+    return map[result.toLowerCase()] ?? result;
   }
 }

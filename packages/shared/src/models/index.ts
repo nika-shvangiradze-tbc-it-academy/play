@@ -81,35 +81,35 @@ export interface GameCatalogEntry {
 export const GAME_CATALOG: readonly GameCatalogEntry[] = [
   {
     type: GameType.NARDI,
-    name: 'Nardi',
+    name: 'ნარდი',
     minPlayers: 2,
     maxPlayers: 2,
     available: true,
-    description: 'Classic Georgian backgammon for 2 players.',
+    description: 'კლასიკური ქართული ნარდი 2 მოთამაშისთვის.',
   },
   {
     type: GameType.JOKER,
-    name: 'Joker',
+    name: 'ჯოკერი',
     minPlayers: 4,
     maxPlayers: 4,
     available: false,
-    description: 'Coming soon.',
+    description: 'მალე.',
   },
   {
     type: GameType.DOMINO,
-    name: 'Domino',
+    name: 'დომინო',
     minPlayers: 4,
     maxPlayers: 4,
     available: false,
-    description: 'Coming soon.',
+    description: 'მალე.',
   },
   {
     type: GameType.BURA,
-    name: 'Bura',
+    name: 'ბურა',
     minPlayers: 2,
     maxPlayers: 4,
     available: false,
-    description: 'Coming soon — 2 or 4 players.',
+    description: 'მალე — 2 ან 4 მოთამაშე.',
   },
 ];
 

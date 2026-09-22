@@ -54,6 +54,6 @@ export class ProfilePage {
       this.error.set(error);
       return;
     }
-    this.success.set('Profile updated');
+    this.success.set('პროფილი განახლდა');
   }
 }

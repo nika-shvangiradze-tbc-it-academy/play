@@ -90,7 +90,7 @@ export class AuthService {
       return { error: availError.message };
     }
     if (available === false) {
-      return { error: 'Username is already taken' };
+      return { error: 'ეს სახელი უკვე დაკავებულია' };
     }
 
     const { error } = await this.supabase.auth.signUp({
@@ -129,7 +129,7 @@ export class AuthService {
 
   async updateProfile(patch: { username?: string; avatar_url?: string | null }): Promise<{ error: string | null }> {
     const id = this.user()?.id;
-    if (!id) return { error: 'Not authenticated' };
+    if (!id) return { error: 'ავტორიზაცია საჭიროა' };
 
     const updates: Record<string, unknown> = {};
     if (patch.username !== undefined) {
@@ -144,7 +144,7 @@ export class AuthService {
 
     const { error } = await this.supabase.from('profiles').update(updates).eq('id', id);
     if (error) {
-      if (error.code === '23505') return { error: 'Username is already taken' };
+      if (error.code === '23505') return { error: 'ეს სახელი უკვე დაკავებულია' };
       return { error: error.message };
     }
     await this.refreshProfile(id);

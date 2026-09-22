@@ -50,18 +50,18 @@ export class LobbyPage {
       const health = await this.api.pingHealth();
       if (!health.ok) {
         throw new Error(
-          'Game server is not reachable on ' +
+          'თამაშის სერვერი მიუწვდომელია (' +
             environment.gameServerHttpUrl +
-            '. From the repo root run `npm run dev` (web + server), or `npm run dev -w @georgian-games/game-server`.',
+            '). გაუშვი საცავის ფესვიდან `npm run dev` (ვები + სერვერი).',
         );
       }
       if (health.matchMakerReady === false) {
-        throw new Error('Game server is up but matchMaker is not READY yet — try again in a moment.');
+        throw new Error('სერვერი ჩართულია, მაგრამ მატჩმეიკერი ჯერ მზად არ არის — სცადე ცოტა ხანში.');
       }
       console.info('[create-room] health ok → POST /api/rooms');
       const room = await this.api.createRoom(GameType.NARDI);
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
-        throw new Error('Server created the table but returned no seat reservation');
+        throw new Error('სერვერმა მაგიდა შექმნა, მაგრამ ადგილი არ დაბრუნდა');
       }
       console.info('[create-room] frontend response received', room.inviteCode, room.lifecycleTraceId);
       await this.session.enterWithReservation(room.reservation, {
@@ -72,13 +72,13 @@ export class LobbyPage {
         lifecycleTraceId: room.lifecycleTraceId,
       });
       if (!this.session.socketOpen()) {
-        throw new Error('Connected to the table but the WebSocket closed immediately');
+        throw new Error('მაგიდასთან დაკავშირება მოხდა, მაგრამ კავშირი მაშინვე გაწყდა');
       }
       console.info('[create-room] navigating', room.inviteCode);
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[create-room] failed', err);
-      this.error.set(err instanceof Error ? err.message : 'Could not create table');
+      this.error.set(err instanceof Error ? err.message : 'მაგიდის შექმნა ვერ მოხერხდა');
     } finally {
       this.busy.set(false);
       this.createInFlight = false;
@@ -88,7 +88,7 @@ export class LobbyPage {
   async joinTable(): Promise<void> {
     const code = normalizeInviteCode(this.joinCode);
     if (!code) {
-      this.error.set('Enter an invite code');
+      this.error.set('შეიყვანე მოწვევის კოდი');
       return;
     }
     if (this.createInFlight || this.busy()) return;
@@ -99,15 +99,15 @@ export class LobbyPage {
       const health = await this.api.pingHealth();
       if (!health.ok) {
         throw new Error(
-          'Game server is not reachable on ' +
+          'თამაშის სერვერი მიუწვდომელია (' +
             environment.gameServerHttpUrl +
-            '. From the repo root run `npm run dev`.',
+            '). გაუშვი საცავის ფესვიდან `npm run dev`.',
         );
       }
       console.info('[lobby] joinTable → POST /api/rooms/join', code);
       const room = await this.api.joinByCode(code);
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
-        throw new Error('Server accepted the join but returned no seat reservation');
+        throw new Error('სერვერმა მიერთება მიიღო, მაგრამ ადგილი არ დაბრუნდა');
       }
       await this.session.enterWithReservation(room.reservation, {
         dbRoomId: room.roomId,
@@ -117,12 +117,12 @@ export class LobbyPage {
         lifecycleTraceId: room.lifecycleTraceId,
       });
       if (!this.session.socketOpen()) {
-        throw new Error('Joined the table but the WebSocket closed immediately');
+        throw new Error('მაგიდასთან მიერთება მოხდა, მაგრამ კავშირი მაშინვე გაწყდა');
       }
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
       console.error('[lobby] joinTable failed', err);
-      this.error.set(err instanceof Error ? err.message : 'Could not join table');
+      this.error.set(err instanceof Error ? err.message : 'მაგიდასთან მიერთება ვერ მოხერხდა');
     } finally {
       this.busy.set(false);
       this.createInFlight = false;
