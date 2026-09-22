@@ -5,6 +5,7 @@ import {
   HostListener,
   afterNextRender,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -52,6 +53,9 @@ export class NardiBoardComponent {
   private readonly boardStage = viewChild<ElementRef<HTMLElement>>('boardStage');
   private resizeObserver: ResizeObserver | null = null;
   private measureRaf = 0;
+  /** Prevents double-submit of roll / recovery pass while waiting for server state. */
+  private rollLock = false;
+  private passRecoveryKey: string | null = null;
 
   readonly view = computed(() => this.previewView() ?? this.colyseus.view());
   readonly mySeat = computed(() => {
@@ -120,6 +124,42 @@ export class NardiBoardComponent {
       this.viewportH.set(window.innerHeight);
       this.attachStageObserver();
       this.scheduleMeasure();
+    });
+
+    // Recover if server/client ever land in WAITING_FOR_MOVE with no moves (both players blocked from rolling).
+    effect(() => {
+      const v = this.view();
+      if (!v || this.previewView()) return;
+      if (v.phase !== 'PLAYING') return;
+
+      if (v.nardiPhase === 'WAITING_FOR_ROLL') {
+        this.rollLock = false;
+        this.passRecoveryKey = null;
+        return;
+      }
+
+      if (v.nardiPhase !== 'WAITING_FOR_MOVE') return;
+      if (!this.isMyTurn()) return;
+      if ((v.legalMoves?.length ?? 0) > 0) {
+        this.passRecoveryKey = null;
+        return;
+      }
+
+      const key = `${v.matchId}:${v.turnNumber}:${v.currentTurn}:empty`;
+      if (this.passRecoveryKey === key) return;
+      this.passRecoveryKey = key;
+
+      console.warn('[nardi:stuck] WAITING_FOR_MOVE with zero legalMoves — requesting PASS', {
+        playerId: this.auth.user()?.id ?? null,
+        currentTurn: v.currentTurn,
+        phase: v.nardiPhase,
+        dice: v.dice,
+        legalMoves: v.legalMoves.length,
+        turnNumber: v.turnNumber,
+        gameStarted: v.phase === 'PLAYING',
+        gameOver: false,
+      });
+      this.colyseus.pass();
     });
 
     this.destroyRef.onDestroy(() => {
@@ -244,13 +284,40 @@ export class NardiBoardComponent {
 
   roll(): void {
     if (this.previewView()) return;
+    console.info('[dice:click]');
+    if (!this.canRoll()) return;
+    if (this.rollLock) return;
+    this.rollLock = true;
     this.selectedFrom.set(null);
+    console.info('[dice:roll-request]', {
+      currentTurn: this.view()?.currentTurn,
+      phase: this.view()?.nardiPhase,
+      seat: this.mySeat()?.seatNumber,
+    });
     this.colyseus.rollDice();
+    // Unlock if the server rejects / state never leaves the roll phase.
+    window.setTimeout(() => {
+      if (this.view()?.nardiPhase === 'WAITING_FOR_ROLL') {
+        this.rollLock = false;
+      }
+    }, 1200);
+  }
+
+  onRollPointerDown(): void {
+    console.info('[dice:pointerdown]', { canRoll: this.canRoll(), disabled: !this.canRoll() });
   }
 
   canRoll(): boolean {
     if (this.previewView()) return false;
-    return this.isMyTurn() && this.view()?.nardiPhase === 'WAITING_FOR_ROLL';
+    if (this.rollLock) return false;
+    const v = this.view();
+    if (!v) return false;
+    return (
+      this.isMyTurn() &&
+      v.phase === 'PLAYING' &&
+      v.nardiPhase === 'WAITING_FOR_ROLL' &&
+      !v.dice.rolled
+    );
   }
 
   dicePips(value: number): number[] {

@@ -173,6 +173,7 @@
   align-items: center;
   /* Portrait: stage height tracks full-width board aspect so measure isn't height-starved */
   min-height: min(56dvh, calc((100% - 0px) / 1.78));
+  overflow: hidden;
 }
 
 :host(.expanded) .board-stage {
@@ -670,6 +671,8 @@
 .pip-7 { grid-area: 3 / 1; } .pip-8 { grid-area: 3 / 2; } .pip-9 { grid-area: 3 / 3; }
 
 .game-toolbar {
+  position: relative;
+  z-index: 12;
   flex: 0 0 auto;
   width: 100%;
   min-width: 0;

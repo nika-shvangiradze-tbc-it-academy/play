@@ -349,20 +349,29 @@ export class ColyseusService {
       }
     }
 
-    const legalRaw = s['legalMoves'] as {
-      length: number;
-      [i: number]: Record<string, unknown>;
-    } | undefined;
+    const legalRaw = s['legalMoves'] as
+      | {
+          length: number;
+          [i: number]: Record<string, unknown> & { from?: number; to?: number; die?: number; hit?: boolean };
+          forEach?: (cb: (v: Record<string, unknown>) => void) => void;
+        }
+      | undefined;
     const legalMoves: LiveLegalMove[] = [];
+    const pushLegal = (m: Record<string, unknown> & { from?: number; to?: number; die?: number; hit?: boolean }) => {
+      legalMoves.push({
+        from: Number(m.from ?? m['from'] ?? 0),
+        to: Number(m.to ?? m['to'] ?? 0),
+        die: Number(m.die ?? m['die'] ?? 0),
+        hit: Boolean(m.hit ?? m['hit']),
+      });
+    };
     if (legalRaw) {
-      for (let i = 0; i < legalRaw.length; i++) {
-        const m = legalRaw[i]!;
-        legalMoves.push({
-          from: Number(m['from'] ?? 0),
-          to: Number(m['to'] ?? 0),
-          die: Number(m['die'] ?? 0),
-          hit: Boolean(m['hit']),
-        });
+      if (typeof legalRaw.forEach === 'function') {
+        legalRaw.forEach((m) => pushLegal(m as typeof m & { from?: number }));
+      } else {
+        for (let i = 0; i < legalRaw.length; i++) {
+          pushLegal(legalRaw[i]!);
+        }
       }
     }
 
@@ -417,8 +426,17 @@ export class ColyseusService {
   }
 
   moveChecker(from: number, to: number): void {
-    const msg: MoveCheckerMessage = { type: ClientIntent.MOVE_CHECKER, from, to };
+    const msg: MoveCheckerMessage = {
+      type: ClientIntent.MOVE_CHECKER,
+      from: Number(from),
+      to: Number(to),
+    };
     this.sendIntent(msg);
+  }
+
+  /** Server-authoritative pass when no legal moves remain (recovery path). */
+  pass(): void {
+    this.sendIntent({ type: ClientIntent.PASS });
   }
 
   leaveRoom(): void {

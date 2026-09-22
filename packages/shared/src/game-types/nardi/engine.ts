@@ -104,18 +104,13 @@ export class NardiEngine {
     const dice: DiceState = { values, remaining, rolled: true };
 
     if (legalMoves.length === 0) {
-      // No moves — turn passes after roll
-      const nextTurn: NardiPlayerIndex = player === 0 ? 1 : 0;
+      // No moves — turn passes after roll (keep face values for clients; rolled=false so next player may roll)
       return {
         ok: true,
         dice: values,
         state: {
-          ...state,
+          ...endTurn(state),
           dice: { values, remaining: [], rolled: false },
-          legalMoves: [],
-          currentTurn: nextTurn,
-          phase: NardiPhase.WAITING_FOR_ROLL,
-          turnNumber: state.turnNumber + 1,
         },
       };
     }
@@ -176,44 +171,24 @@ export class NardiEngine {
     }
 
     if (remaining.length === 0) {
-      const nextTurn: NardiPlayerIndex = player === 0 ? 1 : 0;
       return {
         ok: true,
         move,
         turnedEnded: true,
         winner: null,
-        state: {
-          ...state,
-          board,
-          dice: createInitialDice(),
-          legalMoves: [],
-          moveHistory,
-          currentTurn: nextTurn,
-          phase: NardiPhase.WAITING_FOR_ROLL,
-          turnNumber: state.turnNumber + 1,
-        },
+        state: endTurn({ ...state, board, moveHistory }),
       };
     }
 
     const legalMoves = computeLegalMoves(board, player, remaining);
     if (legalMoves.length === 0) {
       // Remaining dice unusable — end turn
-      const nextTurn: NardiPlayerIndex = player === 0 ? 1 : 0;
       return {
         ok: true,
         move,
         turnedEnded: true,
         winner: null,
-        state: {
-          ...state,
-          board,
-          dice: createInitialDice(),
-          legalMoves: [],
-          moveHistory,
-          currentTurn: nextTurn,
-          phase: NardiPhase.WAITING_FOR_ROLL,
-          turnNumber: state.turnNumber + 1,
-        },
+        state: endTurn({ ...state, board, moveHistory }),
       };
     }
 
@@ -244,20 +219,92 @@ export class NardiEngine {
     if (state.legalMoves.length > 0) {
       return { ok: false, code: 'INVALID_MOVE', message: 'Legal moves remain' };
     }
-    const nextTurn: NardiPlayerIndex = player === 0 ? 1 : 0;
     return {
       ok: true,
       move: { from: -1, to: -1, die: 0, hit: false },
       turnedEnded: true,
       winner: null,
-      state: {
+      state: endTurn(state),
+    };
+  }
+
+  /**
+   * Authoritative invariant: a started, unfinished game must always have a next action.
+   * Heals impossible states that would leave both clients unable to roll or move:
+   * - WAITING_FOR_MOVE with zero legal moves / zero remaining dice
+   * - WAITING_FOR_ROLL with dice still marked rolled
+   * - stale TURN_COMPLETE
+   * - legalMoves out of sync with board + remaining dice
+   */
+  static ensureProgressable(state: NardiGameState): NardiGameState {
+    if (state.winner !== null || state.phase === NardiPhase.GAME_OVER) {
+      return {
+        ...state,
+        phase: NardiPhase.GAME_OVER,
+        legalMoves: [],
+        dice: { ...state.dice, remaining: [], rolled: true },
+      };
+    }
+
+    if (state.phase === NardiPhase.TURN_COMPLETE) {
+      return endTurn(state);
+    }
+
+    if (state.phase === NardiPhase.WAITING_FOR_ROLL) {
+      if (!state.dice.rolled && state.legalMoves.length === 0) {
+        return state;
+      }
+      // Stale roll flag / leftover moves must never block the active player from rolling.
+      return {
         ...state,
         dice: createInitialDice(),
         legalMoves: [],
-        currentTurn: nextTurn,
         phase: NardiPhase.WAITING_FOR_ROLL,
-        turnNumber: state.turnNumber + 1,
-      },
+      };
+    }
+
+    if (state.phase === NardiPhase.WAITING_FOR_MOVE) {
+      const remaining = state.dice.remaining;
+      if (!state.dice.rolled || remaining.length === 0) {
+        return endTurn(state);
+      }
+      const legalMoves = computeLegalMoves(state.board, state.currentTurn, remaining);
+      if (legalMoves.length === 0) {
+        return endTurn(state);
+      }
+      // Keep legalMoves authoritative relative to board + remaining.
+      if (
+        legalMoves.length !== state.legalMoves.length ||
+        legalMoves.some(
+          (m, i) =>
+            m.from !== state.legalMoves[i]?.from ||
+            m.to !== state.legalMoves[i]?.to ||
+            m.die !== state.legalMoves[i]?.die,
+        )
+      ) {
+        return { ...state, legalMoves };
+      }
+      return state;
+    }
+
+    // Unknown / empty phase — recover to a rollable turn.
+    return {
+      ...state,
+      dice: createInitialDice(),
+      legalMoves: [],
+      phase: NardiPhase.WAITING_FOR_ROLL,
     };
   }
+}
+
+function endTurn(state: NardiGameState): NardiGameState {
+  const nextTurn: NardiPlayerIndex = state.currentTurn === 0 ? 1 : 0;
+  return {
+    ...state,
+    dice: createInitialDice(),
+    legalMoves: [],
+    currentTurn: nextTurn,
+    phase: NardiPhase.WAITING_FOR_ROLL,
+    turnNumber: state.turnNumber + 1,
+  };
 }

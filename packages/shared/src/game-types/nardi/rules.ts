@@ -201,7 +201,9 @@ export function findMatchingMove(
   from: number,
   to: number,
 ): NardiMove | undefined {
-  return legal.find((m) => m.from === from && m.to === to);
+  const fromN = Number(from);
+  const toN = Number(to);
+  return legal.find((m) => m.from === fromN && m.to === toN);
 }
 
 /** Remove one occurrence of die from remaining. */

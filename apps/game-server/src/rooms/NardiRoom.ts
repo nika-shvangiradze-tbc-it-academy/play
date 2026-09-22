@@ -75,18 +75,22 @@ export class NardiRoom extends BaseGameRoom {
           this.sendError(client, this.mapCode(result.code), result.message);
           return;
         }
-        this.game = result.state;
+        this.game = NardiEngine.ensureProgressable(result.state);
         this.syncBoardToState();
+        this.logTurnSnapshot('after-roll', seat);
         break;
       }
       case ClientIntent.MOVE_CHECKER: {
-        const result = this.engine.moveChecker(this.game, seat, message.from, message.to);
+        const from = Number(message.from);
+        const to = Number(message.to);
+        const result = this.engine.moveChecker(this.game, seat, from, to);
         if (!result.ok) {
           this.sendError(client, this.mapCode(result.code), result.message);
           return;
         }
-        this.game = result.state;
+        this.game = NardiEngine.ensureProgressable(result.state);
         this.syncBoardToState();
+        this.logTurnSnapshot('after-move', seat);
         if (result.winner !== null) {
           const winnerUserId = this.game.players[result.winner]?.userId ?? null;
           await this.finalizeMatch(winnerUserId, MatchStatus.COMPLETED, null);
@@ -99,8 +103,9 @@ export class NardiRoom extends BaseGameRoom {
           this.sendError(client, this.mapCode(result.code), result.message);
           return;
         }
-        this.game = result.state;
+        this.game = NardiEngine.ensureProgressable(result.state);
         this.syncBoardToState();
+        this.logTurnSnapshot('after-pass', seat);
         break;
       }
       default:
@@ -109,6 +114,7 @@ export class NardiRoom extends BaseGameRoom {
   }
 
   private syncBoardToState(): void {
+    this.game = NardiEngine.ensureProgressable(this.game);
     const g = this.game;
     this.state.nardiPhase = g.phase;
     this.state.currentTurn = g.currentTurn;
@@ -145,6 +151,24 @@ export class NardiRoom extends BaseGameRoom {
     if (g.phase === NardiPhase.GAME_OVER) {
       this.state.nardiPhase = NardiPhase.GAME_OVER;
     }
+  }
+
+  private logTurnSnapshot(label: string, seat: NardiPlayerIndex): void {
+    if (!isDev()) return;
+    const g = this.game;
+    console.log('[nardi:turn]', {
+      label,
+      seat,
+      playerId: g.players[seat]?.userId ?? null,
+      currentTurn: g.currentTurn,
+      phase: g.phase,
+      dice: g.dice.values,
+      rolled: g.dice.rolled,
+      remaining: g.dice.remaining,
+      legalMoves: g.legalMoves.length,
+      turnNumber: g.turnNumber,
+      gameOver: g.phase === NardiPhase.GAME_OVER,
+    });
   }
 
   private mapCode(

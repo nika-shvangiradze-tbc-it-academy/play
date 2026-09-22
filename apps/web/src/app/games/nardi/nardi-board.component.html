@@ -295,7 +295,13 @@
         </div>
 
         <div class="dice-area">
-          <button type="button" class="btn btn-primary roll-btn" [disabled]="!canRoll()" (click)="roll()">
+          <button
+            type="button"
+            class="btn btn-primary roll-btn"
+            [disabled]="!canRoll()"
+            (pointerdown)="onRollPointerDown()"
+            (click)="roll()"
+          >
             Roll Dice
           </button>
           <button type="button" class="btn btn-ghost bear-off-btn" [disabled]="!canBearOff()" (click)="bearOff()">

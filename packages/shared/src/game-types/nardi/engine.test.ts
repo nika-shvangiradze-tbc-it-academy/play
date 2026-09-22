@@ -137,6 +137,152 @@ describe('bar entry & hits', () => {
   });
 });
 
+describe('no-legal-move turn progression', () => {
+  it('auto-passes when roll has zero legal moves', () => {
+    const engine = new NardiEngine(queueRng([1, 1]));
+    let state = NardiEngine.createInitialState(players(), 0);
+    // Block all white bar-entry points (19–24) and put white on bar.
+    const board = createInitialBoard();
+    board.bar[0] = 1;
+    board.points[24] = 1;
+    for (let p = 19; p <= 24; p++) board.points[p] = -2;
+    state = { ...state, board };
+
+    const rolled = engine.rollDice(state, 0);
+    expect(rolled.ok).toBe(true);
+    if (!rolled.ok) return;
+    expect(rolled.state.phase).toBe(NardiPhase.WAITING_FOR_ROLL);
+    expect(rolled.state.currentTurn).toBe(1);
+    expect(rolled.state.dice.rolled).toBe(false);
+    expect(rolled.state.legalMoves).toEqual([]);
+  });
+
+  it('auto-passes mid-turn when remaining die becomes unusable', () => {
+    const engine = new NardiEngine(queueRng([6, 1]));
+    let state = NardiEngine.createInitialState(players(), 0);
+    state = {
+      ...state,
+      board: {
+        points: new Array(25).fill(0),
+        bar: [0, 0],
+        off: [0, 0],
+      },
+    };
+    // White on 8 (outside home). Die 1: 8→7. Die 6: 8→2 blocked.
+    // After 8→7, die 6: 7→1 also blocked → turn must end.
+    state.board.points[8] = 1;
+    state.board.points[2] = -2;
+    state.board.points[1] = -2;
+    state.board.points[24] = -11;
+
+    const rolled = engine.rollDice(state, 0);
+    expect(rolled.ok).toBe(true);
+    if (!rolled.ok) return;
+    expect(rolled.state.phase).toBe(NardiPhase.WAITING_FOR_MOVE);
+
+    const only = rolled.state.legalMoves.find((m) => m.from === 8 && m.to === 7 && m.die === 1);
+    expect(only).toBeDefined();
+    if (!only) return;
+    expect(rolled.state.legalMoves.every((m) => m.die === 1)).toBe(true);
+
+    const moved = engine.moveChecker(rolled.state, 0, only.from, only.to);
+    expect(moved.ok).toBe(true);
+    if (!moved.ok) return;
+    expect(moved.turnedEnded).toBe(true);
+    expect(moved.state.phase).toBe(NardiPhase.WAITING_FOR_ROLL);
+    expect(moved.state.currentTurn).toBe(1);
+    expect(moved.state.dice.rolled).toBe(false);
+  });
+
+  it('ensureProgressable heals WAITING_FOR_MOVE with empty legalMoves', () => {
+    let state = NardiEngine.createInitialState(players(), 0);
+    const board = createInitialBoard();
+    board.bar[0] = 1;
+    board.points[24] = 1;
+    for (let p = 19; p <= 24; p++) board.points[p] = -2;
+    state = {
+      ...state,
+      board,
+      phase: NardiPhase.WAITING_FOR_MOVE,
+      // Remaining die cannot enter — legalMoves empty must end the turn.
+      dice: { values: [1, 2], remaining: [1], rolled: true },
+      legalMoves: [],
+    };
+    const healed = NardiEngine.ensureProgressable(state);
+    expect(healed.phase).toBe(NardiPhase.WAITING_FOR_ROLL);
+    expect(healed.currentTurn).toBe(1);
+    expect(healed.dice.rolled).toBe(false);
+    expect(healed.legalMoves).toEqual([]);
+  });
+
+  it('ensureProgressable restores legalMoves when they were cleared incorrectly', () => {
+    let state = NardiEngine.createInitialState(players(), 0);
+    state = {
+      ...state,
+      phase: NardiPhase.WAITING_FOR_MOVE,
+      dice: { values: [3, 5], remaining: [3, 5], rolled: true },
+      legalMoves: [],
+    };
+    const healed = NardiEngine.ensureProgressable(state);
+    expect(healed.phase).toBe(NardiPhase.WAITING_FOR_MOVE);
+    expect(healed.currentTurn).toBe(0);
+    expect(healed.legalMoves.length).toBeGreaterThan(0);
+  });
+
+  it('ensureProgressable heals WAITING_FOR_ROLL with stale rolled=true', () => {
+    let state = NardiEngine.createInitialState(players(), 0);
+    state = {
+      ...state,
+      phase: NardiPhase.WAITING_FOR_ROLL,
+      dice: { values: [2, 4], remaining: [], rolled: true },
+      legalMoves: [],
+    };
+    const healed = NardiEngine.ensureProgressable(state);
+    expect(healed.phase).toBe(NardiPhase.WAITING_FOR_ROLL);
+    expect(healed.currentTurn).toBe(0);
+    expect(healed.dice.rolled).toBe(false);
+  });
+
+  it('plays 40 consecutive turns without getting stuck', () => {
+    let s = 42;
+    const rng = (min: number, max: number) => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return min + (s % (max - min + 1));
+    };
+    const engine = new NardiEngine(rng);
+    let state = NardiEngine.createInitialState(players(), 0);
+    let turns = 0;
+    for (let step = 0; step < 800 && state.phase !== NardiPhase.GAME_OVER; step++) {
+      state = NardiEngine.ensureProgressable(state);
+      if (state.phase === NardiPhase.WAITING_FOR_ROLL) {
+        const r = engine.rollDice(state, state.currentTurn);
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        state = NardiEngine.ensureProgressable(r.state);
+        continue;
+      }
+      if (state.phase === NardiPhase.WAITING_FOR_MOVE) {
+        expect(state.legalMoves.length).toBeGreaterThan(0);
+        const m = state.legalMoves[rng(0, state.legalMoves.length - 1)]!;
+        const beforeTurn = state.currentTurn;
+        const r = engine.moveChecker(state, state.currentTurn, m.from, m.to);
+        expect(r.ok).toBe(true);
+        if (!r.ok) return;
+        state = NardiEngine.ensureProgressable(r.state);
+        if (r.turnedEnded && state.phase !== NardiPhase.GAME_OVER) {
+          expect(state.currentTurn).not.toBe(beforeTurn);
+          expect(state.phase).toBe(NardiPhase.WAITING_FOR_ROLL);
+          expect(state.dice.rolled).toBe(false);
+          turns += 1;
+        }
+        continue;
+      }
+      throw new Error(`Unexpected phase ${state.phase}`);
+    }
+    expect(turns).toBeGreaterThanOrEqual(20);
+  });
+});
+
 describe('winning condition', () => {
   it('detects win when 15 checkers are off', () => {
     const engine = new NardiEngine(queueRng([6, 6, 6, 6, 6, 6]));
