@@ -3,15 +3,25 @@ import {
   DestroyRef,
   ElementRef,
   HostListener,
+  afterNextRender,
   computed,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { fromEvent } from 'rxjs';
-import { ColyseusService } from '../../core/game/colyseus.service';
+import { ColyseusService, type LiveRoomView } from '../../core/game/colyseus.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
+import {
+  type BoardGeometry,
+  computeBoardGeometry,
+  computeStackLayout,
+  fitBoardSize,
+  geometryCssVars,
+  stackCssVars,
+} from './board-geometry';
 
 @Component({
   selector: 'app-nardi-board',
@@ -20,21 +30,45 @@ import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
   styleUrl: './nardi-board.component.scss',
   host: {
     '[class.expanded]': 'expanded()',
+    '[class.compact]': 'isCompact()',
     '[attr.data-expanded]': 'expanded() ? "true" : null',
   },
 })
 export class NardiBoardComponent {
   readonly colyseus = inject(ColyseusService);
   readonly auth = inject(AuthService);
-  private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly hostEl = inject(ElementRef<HTMLElement>);
   private readonly destroyRef = inject(DestroyRef);
+
+  /** Optional mock view for visual / layout preview (no network). */
+  readonly previewView = signal<LiveRoomView | null>(null);
 
   readonly selectedFrom = signal<number | null>(null);
   readonly expanded = signal(false);
+  readonly geometry = signal<BoardGeometry>(defaultGeometry());
+  readonly viewportW = signal(typeof window !== 'undefined' ? window.innerWidth : 1024);
+  readonly viewportH = signal(typeof window !== 'undefined' ? window.innerHeight : 768);
 
-  readonly view = this.colyseus.view;
-  readonly mySeat = this.colyseus.mySeat;
-  readonly isMyTurn = this.colyseus.isMyTurn;
+  private readonly boardStage = viewChild<ElementRef<HTMLElement>>('boardStage');
+  private resizeObserver: ResizeObserver | null = null;
+  private measureRaf = 0;
+
+  readonly view = computed(() => this.previewView() ?? this.colyseus.view());
+  readonly mySeat = computed(() => {
+    if (this.previewView()) {
+      return this.previewView()!.seats[0] ?? null;
+    }
+    return this.colyseus.mySeat();
+  });
+  readonly isMyTurn = computed(() => {
+    if (this.previewView()) return true;
+    return this.colyseus.isMyTurn();
+  });
+
+  readonly isCompact = computed(
+    () => this.viewportW() < 900 || this.viewportH() < 540,
+  );
+  readonly geoCss = computed(() => geometryCssVars(this.geometry()));
 
   readonly topPoints = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
   readonly bottomPoints = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
@@ -73,11 +107,33 @@ export class NardiBoardComponent {
         }
       });
 
+    fromEvent(window, 'resize')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.viewportW.set(window.innerWidth);
+        this.viewportH.set(window.innerHeight);
+        this.scheduleMeasure();
+      });
+
+    afterNextRender(() => {
+      this.viewportW.set(window.innerWidth);
+      this.viewportH.set(window.innerHeight);
+      this.attachStageObserver();
+      this.scheduleMeasure();
+    });
+
     this.destroyRef.onDestroy(() => {
+      if (this.measureRaf) cancelAnimationFrame(this.measureRaf);
+      this.resizeObserver?.disconnect();
       this.clearExpandedChrome();
       void this.exitFullscreenSafe();
       void this.unlockOrientationSafe();
     });
+  }
+
+  /** Used by preview page only. */
+  setPreview(view: LiveRoomView | null): void {
+    this.previewView.set(view);
   }
 
   checkersAt(point: number): { player: 0 | 1; count: number } | null {
@@ -90,10 +146,46 @@ export class NardiBoardComponent {
     return this.view()?.points[point] ?? 0;
   }
 
+  stackLayout(count: number) {
+    const g = this.geometry();
+    return computeStackLayout(count, g.checkerSize, g.stackHeight);
+  }
+
+  stackStyle(count: number): Record<string, string> {
+    return stackCssVars(this.stackLayout(count));
+  }
+
+  checkerIndices(count: number): number[] {
+    const visible = this.stackLayout(count).visible;
+    return Array.from({ length: visible }, (_, i) => i);
+  }
+
+  stackBadge(count: number): number {
+    return this.stackLayout(count).badge;
+  }
+
+  barStackLayout(count: number) {
+    const g = this.geometry();
+    const barStackH = Math.max(g.stackHeight * 0.85, g.checkerSize);
+    return computeStackLayout(count || 1, g.checkerSize * 0.88, barStackH);
+  }
+
+  barStackStyle(count: number): Record<string, string> {
+    return stackCssVars(this.barStackLayout(count));
+  }
+
+  barCheckerIndices(count: number): number[] {
+    const visible = this.barStackLayout(count).visible;
+    return Array.from({ length: visible }, (_, i) => i);
+  }
+
+  barBadge(count: number): number {
+    return this.barStackLayout(count).badge;
+  }
+
   isSelectable(point: number): boolean {
     if (!this.isMyTurn()) return false;
-    const seat = this.mySeat()?.seatNumber;
-    if (seat === undefined) return false;
+    if (this.mySeat()?.seatNumber === undefined && !this.previewView()) return false;
     const moves = this.view()?.legalMoves ?? [];
     return moves.some((m) => m.from === point);
   }
@@ -104,6 +196,11 @@ export class NardiBoardComponent {
 
   onPointClick(point: number): void {
     if (!this.isMyTurn()) return;
+    if (this.previewView()) {
+      this.selectedFrom.set(this.selectedFrom() === point ? null : point);
+      return;
+    }
+
     const selected = this.selectedFrom();
     const moves = this.view()?.legalMoves ?? [];
 
@@ -122,6 +219,7 @@ export class NardiBoardComponent {
   }
 
   onBarClick(player: 0 | 1): void {
+    if (this.previewView()) return;
     if (this.mySeat()?.seatNumber !== player) return;
     if (!this.isMyTurn()) return;
     const moves = this.view()?.legalMoves ?? [];
@@ -131,6 +229,7 @@ export class NardiBoardComponent {
   }
 
   bearOff(): void {
+    if (this.previewView()) return;
     const from = this.selectedFrom();
     if (from === null) return;
     if (!this.legalTargets().has(OFF_POINT)) return;
@@ -139,30 +238,19 @@ export class NardiBoardComponent {
   }
 
   canBearOff(): boolean {
+    if (this.previewView()) return false;
     return this.selectedFrom() !== null && this.legalTargets().has(OFF_POINT);
   }
 
   roll(): void {
+    if (this.previewView()) return;
     this.selectedFrom.set(null);
     this.colyseus.rollDice();
   }
 
   canRoll(): boolean {
+    if (this.previewView()) return false;
     return this.isMyTurn() && this.view()?.nardiPhase === 'WAITING_FOR_ROLL';
-  }
-
-  checkerArray(count: number): number[] {
-    const n = Math.min(count, 5);
-    return Array.from({ length: n }, (_, i) => i);
-  }
-
-  overflow(count: number): number {
-    return count > 5 ? count : 0;
-  }
-
-  /** Visible stack depth (1–5) drives checker diameter / spacing via CSS. */
-  stackN(count: number): number {
-    return Math.min(Math.max(count, 1), 5);
   }
 
   dicePips(value: number): number[] {
@@ -197,11 +285,43 @@ export class NardiBoardComponent {
     }
   }
 
+  private attachStageObserver(): void {
+    const el = this.boardStage()?.nativeElement;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = new ResizeObserver(() => this.scheduleMeasure());
+    this.resizeObserver.observe(el);
+  }
+
+  private scheduleMeasure(): void {
+    if (this.measureRaf) cancelAnimationFrame(this.measureRaf);
+    this.measureRaf = requestAnimationFrame(() => {
+      this.measureRaf = 0;
+      this.measureBoard();
+      if (!this.resizeObserver) this.attachStageObserver();
+    });
+  }
+
+  private measureBoard(): void {
+    const stage = this.boardStage()?.nativeElement;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    if (rect.width < 32 || rect.height < 32) return;
+
+    const fitted = fitBoardSize({ stageWidth: rect.width, stageHeight: rect.height });
+    if (fitted.width < 32) return;
+    this.geometry.set(computeBoardGeometry(fitted.width, fitted.height));
+  }
+
   private async enterExpanded(): Promise<void> {
     this.expanded.set(true);
     document.body.classList.add('nardi-expanded');
-    await this.requestFullscreenSafe(this.host.nativeElement);
+    await this.requestFullscreenSafe(this.hostEl.nativeElement);
     await this.lockLandscapeSafe();
+    requestAnimationFrame(() => {
+      this.scheduleMeasure();
+      setTimeout(() => this.scheduleMeasure(), 120);
+    });
   }
 
   private async exitExpanded(exitFs: boolean): Promise<void> {
@@ -209,6 +329,7 @@ export class NardiBoardComponent {
     this.clearExpandedChrome();
     await this.unlockOrientationSafe();
     if (exitFs) await this.exitFullscreenSafe();
+    requestAnimationFrame(() => this.scheduleMeasure());
   }
 
   private clearExpandedChrome(): void {
@@ -227,7 +348,7 @@ export class NardiBoardComponent {
         await Promise.resolve(anyEl.webkitRequestFullscreen());
       }
     } catch {
-      /* Fullscreen may be blocked; fixed overlay still works. */
+      /* overlay fallback */
     }
   }
 
@@ -255,7 +376,7 @@ export class NardiBoardComponent {
         await orientation.lock('landscape');
       }
     } catch {
-      /* Orientation lock is often unavailable; CSS landscape layout still applies. */
+      /* CSS layout still works without lock */
     }
   }
 
@@ -269,4 +390,13 @@ export class NardiBoardComponent {
 
   readonly BAR = BAR_POINT;
   readonly OFF = OFF_POINT;
+}
+
+function defaultGeometry(): BoardGeometry {
+  const vw = typeof window !== 'undefined' ? window.innerWidth : 390;
+  const vh = typeof window !== 'undefined' ? window.innerHeight : 700;
+  const stageW = Math.max(280, Math.min(vw - 16, 1120));
+  const stageH = Math.max(160, Math.min(vh * 0.55, stageW / 1.78 + 8));
+  const fitted = fitBoardSize({ stageWidth: stageW, stageHeight: stageH });
+  return computeBoardGeometry(fitted.width, fitted.height);
 }

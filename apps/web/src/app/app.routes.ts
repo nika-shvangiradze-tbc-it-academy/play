@@ -42,5 +42,10 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./pages/profile/profile.page').then((m) => m.ProfilePage),
   },
+  {
+    path: 'dev/nardi-board',
+    loadComponent: () =>
+      import('./pages/dev/nardi-preview.page').then((m) => m.NardiPreviewPage),
+  },
   { path: '**', redirectTo: '' },
 ];
