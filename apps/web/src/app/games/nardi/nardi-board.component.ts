@@ -1,4 +1,14 @@
-import { Component, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  ElementRef,
+  HostListener,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { fromEvent } from 'rxjs';
 import { ColyseusService } from '../../core/game/colyseus.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
@@ -8,12 +18,19 @@ import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
   standalone: true,
   templateUrl: './nardi-board.component.html',
   styleUrl: './nardi-board.component.scss',
+  host: {
+    '[class.expanded]': 'expanded()',
+    '[attr.data-expanded]': 'expanded() ? "true" : null',
+  },
 })
 export class NardiBoardComponent {
   readonly colyseus = inject(ColyseusService);
   readonly auth = inject(AuthService);
+  private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly selectedFrom = signal<number | null>(null);
+  readonly expanded = signal(false);
 
   readonly view = this.colyseus.view;
   readonly mySeat = this.colyseus.mySeat;
@@ -46,6 +63,22 @@ export class NardiBoardComponent {
     if (from === null) return new Set<number>();
     return new Set(moves.filter((m) => m.from === from).map((m) => m.to));
   });
+
+  constructor() {
+    fromEvent(document, 'fullscreenchange')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        if (!document.fullscreenElement && this.expanded()) {
+          this.exitExpanded(false);
+        }
+      });
+
+    this.destroyRef.onDestroy(() => {
+      this.clearExpandedChrome();
+      void this.exitFullscreenSafe();
+      void this.unlockOrientationSafe();
+    });
+  }
 
   checkersAt(point: number): { player: 0 | 1; count: number } | null {
     const v = this.pointsValue(point);
@@ -127,6 +160,11 @@ export class NardiBoardComponent {
     return count > 5 ? count : 0;
   }
 
+  /** Visible stack depth (1–5) drives checker diameter / spacing via CSS. */
+  stackN(count: number): number {
+    return Math.min(Math.max(count, 1), 5);
+  }
+
   dicePips(value: number): number[] {
     const slots: Record<number, number[]> = {
       1: [5],
@@ -142,6 +180,91 @@ export class NardiBoardComponent {
   playerName(seatNumber: number): string {
     return this.view()?.seats.find((seat) => seat.seatNumber === seatNumber)?.username
       ?? `Player ${seatNumber + 1}`;
+  }
+
+  async toggleExpanded(): Promise<void> {
+    if (this.expanded()) {
+      await this.exitExpanded(true);
+      return;
+    }
+    await this.enterExpanded();
+  }
+
+  @HostListener('document:keydown.escape')
+  onEscape(): void {
+    if (this.expanded()) {
+      void this.exitExpanded(true);
+    }
+  }
+
+  private async enterExpanded(): Promise<void> {
+    this.expanded.set(true);
+    document.body.classList.add('nardi-expanded');
+    await this.requestFullscreenSafe(this.host.nativeElement);
+    await this.lockLandscapeSafe();
+  }
+
+  private async exitExpanded(exitFs: boolean): Promise<void> {
+    this.expanded.set(false);
+    this.clearExpandedChrome();
+    await this.unlockOrientationSafe();
+    if (exitFs) await this.exitFullscreenSafe();
+  }
+
+  private clearExpandedChrome(): void {
+    document.body.classList.remove('nardi-expanded');
+  }
+
+  private async requestFullscreenSafe(el: HTMLElement): Promise<void> {
+    const anyEl = el as HTMLElement & {
+      webkitRequestFullscreen?: () => Promise<void> | void;
+    };
+    try {
+      if (document.fullscreenElement) return;
+      if (el.requestFullscreen) {
+        await el.requestFullscreen();
+      } else if (anyEl.webkitRequestFullscreen) {
+        await Promise.resolve(anyEl.webkitRequestFullscreen());
+      }
+    } catch {
+      /* Fullscreen may be blocked; fixed overlay still works. */
+    }
+  }
+
+  private async exitFullscreenSafe(): Promise<void> {
+    const doc = document as Document & {
+      webkitExitFullscreen?: () => Promise<void> | void;
+    };
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (doc.webkitExitFullscreen) {
+        await Promise.resolve(doc.webkitExitFullscreen());
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async lockLandscapeSafe(): Promise<void> {
+    try {
+      const orientation = screen.orientation as ScreenOrientation & {
+        lock?: (o: string) => Promise<void>;
+      };
+      if (typeof orientation?.lock === 'function') {
+        await orientation.lock('landscape');
+      }
+    } catch {
+      /* Orientation lock is often unavailable; CSS landscape layout still applies. */
+    }
+  }
+
+  private async unlockOrientationSafe(): Promise<void> {
+    try {
+      screen.orientation?.unlock?.();
+    } catch {
+      /* ignore */
+    }
   }
 
   readonly BAR = BAR_POINT;

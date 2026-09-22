@@ -142,3 +142,19 @@ button {
   color: #9dd4b5;
   font-size: 0.9rem;
 }
+
+/* Nardi mobile expanded / landscape game view */
+body.nardi-expanded {
+  overflow: hidden;
+}
+
+body.nardi-expanded .topnav {
+  display: none !important;
+}
+
+body.nardi-expanded .main {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+}
