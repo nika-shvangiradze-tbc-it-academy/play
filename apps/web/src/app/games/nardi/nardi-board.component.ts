@@ -16,7 +16,7 @@ import { fromEvent } from 'rxjs';
 import { ColyseusService, type LiveRoomView } from '../../core/game/colyseus.service';
 import { AuthService } from '../../core/auth/auth.service';
 import { GameSessionService } from '../../core/game/game-session.service';
-import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
+import { BAR_POINT, OFF_POINT, type NardiPlayerIndex } from '@georgian-games/shared';
 import {
   type BoardGeometry,
   computeBoardGeometry,
@@ -25,6 +25,12 @@ import {
   geometryCssVars,
   stackCssVars,
 } from './board-geometry';
+import {
+  barPlayerOrder,
+  displayPointRows,
+  perspectiveFromSeat,
+  toLogicalPoint,
+} from './board-perspective';
 import {
   prefersReducedMotion,
   startEndGameCelebration,
@@ -51,6 +57,8 @@ export class NardiBoardComponent {
 
   /** Optional mock view for visual / layout preview (no network). */
   readonly previewView = signal<LiveRoomView | null>(null);
+  /** Preview-only: which seat is "local" for perspective QA (0 white / 1 black). */
+  readonly previewLocalSeat = signal<NardiPlayerIndex>(0);
 
   readonly selectedFrom = signal<number | null>(null);
   readonly expanded = signal(false);
@@ -79,7 +87,8 @@ export class NardiBoardComponent {
   readonly view = computed(() => this.previewView() ?? this.colyseus.view());
   readonly mySeat = computed(() => {
     if (this.previewView()) {
-      return this.previewView()!.seats[0] ?? null;
+      const seat = this.previewLocalSeat();
+      return this.previewView()!.seats.find((s) => s.seatNumber === seat) ?? null;
     }
     return this.colyseus.mySeat();
   });
@@ -88,17 +97,46 @@ export class NardiBoardComponent {
     return this.colyseus.isMyTurn();
   });
 
+  /** Camera: white or black. Derived from local seat — not username. */
+  readonly perspective = computed(() =>
+    perspectiveFromSeat(this.mySeat()?.seatNumber as NardiPlayerIndex | undefined),
+  );
+
+  readonly localSeatNumber = computed<NardiPlayerIndex>(() => {
+    const seat = this.mySeat()?.seatNumber;
+    return seat === 1 ? 1 : 0;
+  });
+  readonly opponentSeatNumber = computed<NardiPlayerIndex>(() =>
+    this.localSeatNumber() === 0 ? 1 : 0,
+  );
+
+  /** Seats ordered local → opponent for chrome that follows perspective. */
+  readonly perspectiveSeats = computed(() => {
+    const v = this.view();
+    if (!v) return [];
+    const local = this.localSeatNumber();
+    return [...v.seats].sort((a, b) => {
+      if (a.seatNumber === local) return -1;
+      if (b.seatNumber === local) return 1;
+      return a.seatNumber - b.seatNumber;
+    });
+  });
+
   readonly isCompact = computed(
     () => this.viewportW() < 900 || this.viewportH() < 540,
   );
   readonly geoCss = computed(() => geometryCssVars(this.geometry()));
 
-  readonly topPoints = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24];
-  readonly bottomPoints = [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
-  readonly topLeftPoints = this.topPoints.slice(0, 6);
-  readonly topRightPoints = this.topPoints.slice(6);
-  readonly bottomLeftPoints = this.bottomPoints.slice(0, 6);
-  readonly bottomRightPoints = this.bottomPoints.slice(6);
+  /** Display-slot rows (fixed white-view geometry). Logical ids via logicalPoint(). */
+  readonly topPoints = computed(() => [...displayPointRows().top]);
+  readonly bottomPoints = computed(() => [...displayPointRows().bottom]);
+  readonly topLeftPoints = computed(() => this.topPoints().slice(0, 6));
+  readonly topRightPoints = computed(() => this.topPoints().slice(6));
+  readonly bottomLeftPoints = computed(() => this.bottomPoints().slice(0, 6));
+  readonly bottomRightPoints = computed(() => this.bottomPoints().slice(6));
+
+  /** Center bar: [far/top player, near/bottom player]. */
+  readonly barOrder = computed(() => barPlayerOrder(this.perspective()));
 
   readonly statusText = computed(() => {
     const v = this.view();
@@ -242,7 +280,7 @@ export class NardiBoardComponent {
   }
 
   /** Used by preview page only. */
-  setPreview(view: LiveRoomView | null): void {
+  setPreview(view: LiveRoomView | null, localSeat: NardiPlayerIndex = 0): void {
     this.teardownCelebration();
     if (this.resultCardTimer) clearTimeout(this.resultCardTimer);
     this.resultCardTimer = null;
@@ -251,6 +289,8 @@ export class NardiBoardComponent {
     this.resultCardVisible.set(false);
     this.resultKind.set(null);
     this.sawLivePlay = false;
+    this.previewLocalSeat.set(localSeat);
+    this.selectedFrom.set(null);
     this.previewView.set(view);
   }
 
@@ -331,8 +371,30 @@ export class NardiBoardComponent {
     return { player: v > 0 ? 0 : 1, count: Math.abs(v) };
   }
 
+  /** Display slot → checkers from the mapped logical point. */
+  checkersAtDisplay(displayPoint: number): { player: 0 | 1; count: number } | null {
+    return this.checkersAt(this.logicalPoint(displayPoint));
+  }
+
   pointsValue(point: number): number {
     return this.view()?.points[point] ?? 0;
+  }
+
+  /** Display slot → canonical logical point for this camera. */
+  logicalPoint(displayPoint: number): number {
+    return toLogicalPoint(displayPoint, this.perspective());
+  }
+
+  isDisplaySelectable(displayPoint: number): boolean {
+    return this.isSelectable(this.logicalPoint(displayPoint));
+  }
+
+  isDisplayTarget(displayPoint: number): boolean {
+    return this.isTarget(this.logicalPoint(displayPoint));
+  }
+
+  isDisplaySelected(displayPoint: number): boolean {
+    return this.selectedFrom() === this.logicalPoint(displayPoint);
   }
 
   stackLayout(count: number) {
@@ -385,29 +447,46 @@ export class NardiBoardComponent {
     return this.legalTargets().has(point);
   }
 
-  onPointClick(point: number): void {
+  /**
+   * Point buttons bind DISPLAY slot ids (white-view geometry).
+   * Convert to logical before selection / server moves.
+   */
+  onPointClick(displayPoint: number): void {
     if (this.isMatchFinished()) return;
     if (!this.isMyTurn()) return;
+    const logical = toLogicalPoint(displayPoint, this.perspective());
     if (this.previewView()) {
-      this.selectedFrom.set(this.selectedFrom() === point ? null : point);
+      this.selectedFrom.set(this.selectedFrom() === logical ? null : logical);
       return;
     }
 
     const selected = this.selectedFrom();
     const moves = this.view()?.legalMoves ?? [];
 
-    if (selected !== null && this.legalTargets().has(point)) {
-      this.colyseus.moveChecker(selected, point);
+    if (selected !== null && this.legalTargets().has(logical)) {
+      this.colyseus.moveChecker(selected, logical);
       this.selectedFrom.set(null);
       return;
     }
 
-    if (moves.some((m) => m.from === point)) {
-      this.selectedFrom.set(point);
+    if (moves.some((m) => m.from === logical)) {
+      this.selectedFrom.set(logical);
       return;
     }
 
     this.selectedFrom.set(null);
+  }
+
+  barCount(player: NardiPlayerIndex): number {
+    const v = this.view();
+    if (!v) return 0;
+    return player === 0 ? v.bar0 : v.bar1;
+  }
+
+  offCount(player: NardiPlayerIndex): number {
+    const v = this.view();
+    if (!v) return 0;
+    return player === 0 ? v.off0 : v.off1;
   }
 
   onBarClick(player: 0 | 1): void {

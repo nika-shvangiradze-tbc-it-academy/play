@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "free-port": "node ./scripts/free-port.mjs",
+    "predev": "node ./scripts/free-port.mjs",
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",

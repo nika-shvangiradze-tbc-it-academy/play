@@ -116,7 +116,7 @@ export class ColyseusService {
 
     if (this.joinInFlight) {
       console.info(`[trace:${trace}] CLIENT waiting for in-flight join`);
-      await this.joinInFlight;
+      await this.withTimeout(this.joinInFlight, 30_000, 'In-flight WebSocket join');
       if (this.room && this.room.roomId === colyseusRoomId && this.isRoomSocketOpen(this.room)) {
         this.connected.set(true);
         this.socketOpen.set(true);

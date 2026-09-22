@@ -26,7 +26,7 @@
       </div>
       <p class="status">{{ statusText() }}</p>
       <div class="players">
-        @for (seat of v.seats; track seat.seatNumber) {
+        @for (seat of perspectiveSeats(); track seat.seatNumber) {
           <div
             class="player-chip"
             [class.active]="v.currentTurn === seat.seatNumber && v.phase === 'PLAYING'"
@@ -68,20 +68,20 @@
         >
           <div class="playing-field">
             <div class="quadrant top left-half">
-              @for (p of topLeftPoints; track p) {
+              @for (p of topLeftPoints(); track p) {
                 <button
                   type="button"
                   class="point top"
                   [class.dark]="p % 2 === 0"
                   [class.light]="p % 2 !== 0"
-                  [class.selectable]="isSelectable(p)"
-                  [class.target]="isTarget(p)"
-                  [class.selected]="selectedFrom() === p"
+                  [class.selectable]="isDisplaySelectable(p)"
+                  [class.target]="isDisplayTarget(p)"
+                  [class.selected]="isDisplaySelected(p)"
+                  [attr.data-point]="logicalPoint(p)"
                   (click)="onPointClick(p)"
                 >
                   <span class="point-face" aria-hidden="true"></span>
-                  <span class="pip">{{ p }}</span>
-                  @if (checkersAt(p); as c) {
+                  @if (checkersAtDisplay(p); as c) {
                     <div
                       class="stack from-top"
                       [style.--stack-size.px]="stackLayout(c.count).size"
@@ -108,56 +108,53 @@
             </div>
 
             <div class="center-bar" [class.selected]="selectedFrom() === BAR">
-              <button
-                class="bar-zone bar-p1"
-                type="button"
-                (click)="onBarClick(1)"
-                aria-label="Player 2 captured checkers"
-                [style.--stack-size.px]="barStackLayout(v.bar1).size"
-                [style.--stack-step.px]="barStackLayout(v.bar1).step"
-                [style.--stack-visible]="barStackLayout(v.bar1).visible"
-              >
-                @for (i of barCheckerIndices(v.bar1); track i) {
-                  <span class="checker p1" [style.--i]="i"></span>
+              @for (seat of barOrder(); track seat; let isFar = $first) {
+                <button
+                  class="bar-zone"
+                  [class.bar-far]="isFar"
+                  [class.bar-near]="!isFar"
+                  [class.bar-p0]="seat === 0"
+                  [class.bar-p1]="seat === 1"
+                  type="button"
+                  (click)="onBarClick(seat)"
+                  [attr.aria-label]="(seat === 0 ? 'White' : 'Dark') + ' captured checkers'"
+                  [style.--stack-size.px]="barStackLayout(barCount(seat)).size"
+                  [style.--stack-step.px]="barStackLayout(barCount(seat)).step"
+                  [style.--stack-visible]="barStackLayout(barCount(seat)).visible"
+                >
+                  @for (i of barCheckerIndices(barCount(seat)); track i) {
+                    <span
+                      class="checker"
+                      [class.p0]="seat === 0"
+                      [class.p1]="seat === 1"
+                      [style.--i]="i"
+                    ></span>
+                  }
+                  @if (barBadge(barCount(seat)); as n) {
+                    @if (n) { <span class="count">{{ n }}</span> }
+                  }
+                </button>
+                @if (isFar) {
+                  <span class="bar-mark" aria-hidden="true"></span>
                 }
-                @if (barBadge(v.bar1); as n) {
-                  @if (n) { <span class="count">{{ n }}</span> }
-                }
-              </button>
-              <span class="bar-mark" aria-hidden="true"></span>
-              <button
-                class="bar-zone bar-p0"
-                type="button"
-                (click)="onBarClick(0)"
-                aria-label="Player 1 captured checkers"
-                [style.--stack-size.px]="barStackLayout(v.bar0).size"
-                [style.--stack-step.px]="barStackLayout(v.bar0).step"
-                [style.--stack-visible]="barStackLayout(v.bar0).visible"
-              >
-                @for (i of barCheckerIndices(v.bar0); track i) {
-                  <span class="checker p0" [style.--i]="i"></span>
-                }
-                @if (barBadge(v.bar0); as n) {
-                  @if (n) { <span class="count">{{ n }}</span> }
-                }
-              </button>
+              }
             </div>
 
             <div class="quadrant top right-half">
-              @for (p of topRightPoints; track p) {
+              @for (p of topRightPoints(); track p) {
                 <button
                   type="button"
                   class="point top"
                   [class.dark]="p % 2 === 0"
                   [class.light]="p % 2 !== 0"
-                  [class.selectable]="isSelectable(p)"
-                  [class.target]="isTarget(p)"
-                  [class.selected]="selectedFrom() === p"
+                  [class.selectable]="isDisplaySelectable(p)"
+                  [class.target]="isDisplayTarget(p)"
+                  [class.selected]="isDisplaySelected(p)"
+                  [attr.data-point]="logicalPoint(p)"
                   (click)="onPointClick(p)"
                 >
                   <span class="point-face" aria-hidden="true"></span>
-                  <span class="pip">{{ p }}</span>
-                  @if (checkersAt(p); as c) {
+                  @if (checkersAtDisplay(p); as c) {
                     <div
                       class="stack from-top"
                       [style.--stack-size.px]="stackLayout(c.count).size"
@@ -182,20 +179,20 @@
             </div>
 
             <div class="quadrant bottom left-half">
-              @for (p of bottomLeftPoints; track p) {
+              @for (p of bottomLeftPoints(); track p) {
                 <button
                   type="button"
                   class="point bottom"
                   [class.dark]="p % 2 === 0"
                   [class.light]="p % 2 !== 0"
-                  [class.selectable]="isSelectable(p)"
-                  [class.target]="isTarget(p)"
-                  [class.selected]="selectedFrom() === p"
+                  [class.selectable]="isDisplaySelectable(p)"
+                  [class.target]="isDisplayTarget(p)"
+                  [class.selected]="isDisplaySelected(p)"
+                  [attr.data-point]="logicalPoint(p)"
                   (click)="onPointClick(p)"
                 >
                   <span class="point-face" aria-hidden="true"></span>
-                  <span class="pip">{{ p }}</span>
-                  @if (checkersAt(p); as c) {
+                  @if (checkersAtDisplay(p); as c) {
                     <div
                       class="stack"
                       [style.--stack-size.px]="stackLayout(c.count).size"
@@ -220,20 +217,20 @@
             </div>
 
             <div class="quadrant bottom right-half">
-              @for (p of bottomRightPoints; track p) {
+              @for (p of bottomRightPoints(); track p) {
                 <button
                   type="button"
                   class="point bottom"
                   [class.dark]="p % 2 === 0"
                   [class.light]="p % 2 !== 0"
-                  [class.selectable]="isSelectable(p)"
-                  [class.target]="isTarget(p)"
-                  [class.selected]="selectedFrom() === p"
+                  [class.selectable]="isDisplaySelectable(p)"
+                  [class.target]="isDisplayTarget(p)"
+                  [class.selected]="isDisplaySelected(p)"
+                  [attr.data-point]="logicalPoint(p)"
                   (click)="onPointClick(p)"
                 >
                   <span class="point-face" aria-hidden="true"></span>
-                  <span class="pip">{{ p }}</span>
-                  @if (checkersAt(p); as c) {
+                  @if (checkersAtDisplay(p); as c) {
                     <div
                       class="stack"
                       [style.--stack-size.px]="stackLayout(c.count).size"
@@ -288,10 +285,15 @@
       </div>
 
       <div class="game-toolbar panel">
-        <div class="off-box player-one">
-          <span class="player-disc p0" aria-hidden="true"></span>
-          <span class="off-name">{{ playerName(0) }}</span>
-          <strong>Off {{ v.off0 }}</strong>
+        <div class="off-box local-player" [class.player-one]="localSeatNumber() === 0" [class.player-two]="localSeatNumber() === 1">
+          <span
+            class="player-disc"
+            [class.p0]="localSeatNumber() === 0"
+            [class.p1]="localSeatNumber() === 1"
+            aria-hidden="true"
+          ></span>
+          <span class="off-name">{{ playerName(localSeatNumber()) }}</span>
+          <strong>Off {{ offCount(localSeatNumber()) }}</strong>
         </div>
 
         <div class="dice-area">
@@ -309,10 +311,15 @@
           </button>
         </div>
 
-        <div class="off-box player-two">
-          <span class="player-disc p1" aria-hidden="true"></span>
-          <span class="off-name">{{ playerName(1) }}</span>
-          <strong>Off {{ v.off1 }}</strong>
+        <div class="off-box opponent-player" [class.player-one]="opponentSeatNumber() === 0" [class.player-two]="opponentSeatNumber() === 1">
+          <span
+            class="player-disc"
+            [class.p0]="opponentSeatNumber() === 0"
+            [class.p1]="opponentSeatNumber() === 1"
+            aria-hidden="true"
+          ></span>
+          <span class="off-name">{{ playerName(opponentSeatNumber()) }}</span>
+          <strong>Off {{ offCount(opponentSeatNumber()) }}</strong>
         </div>
       </div>
     </div>

@@ -44,7 +44,19 @@ async function main(): Promise<void> {
 
   // Must use gameServer.listen so matchMaker.accept() runs (IPC / READY state).
   // Calling httpServer.listen alone leaves matchmaking half-initialized.
-  await gameServer.listen(env.PORT);
+  try {
+    await gameServer.listen(env.PORT);
+  } catch (err) {
+    const code = err && typeof err === 'object' && 'code' in err ? String((err as { code?: string }).code) : '';
+    if (code === 'EADDRINUSE') {
+      console.error(
+        `[game-server] fatal: port ${env.PORT} is already in use (EADDRINUSE). ` +
+          `An orphaned Node process may be accepting TCP without answering HTTP — ` +
+          `that makes POST /api/rooms hang forever. Run: npm run free-port -w @georgian-games/game-server`,
+      );
+    }
+    throw err;
+  }
   console.log(
     `[startup] pid=${process.pid} processId=${matchMaker.processId} port=${env.PORT}`,
   );

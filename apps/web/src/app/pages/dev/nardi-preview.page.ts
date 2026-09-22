@@ -1,6 +1,6 @@
 import { Component, OnInit, inject, viewChild } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { createInitialBoard } from '@georgian-games/shared';
+import { createInitialBoard, type NardiPlayerIndex } from '@georgian-games/shared';
 import { NardiBoardComponent } from '../../games/nardi/nardi-board.component';
 import type { LiveRoomView } from '../../core/game/colyseus.service';
 
@@ -23,6 +23,13 @@ type PreviewScenario = 'initial' | 'stacks' | 'bar' | 'bearoff' | 'win' | 'loss'
             <option value="bearoff">Bearing off</option>
             <option value="win">End — local win</option>
             <option value="loss">End — local loss</option>
+          </select>
+        </label>
+        <label>
+          Local seat
+          <select [value]="localSeat" (change)="onSeat($event)">
+            <option value="0">White (seat 0)</option>
+            <option value="1">Dark (seat 1)</option>
           </select>
         </label>
         <span class="hint">Visual QA — not a live match</span>
@@ -60,12 +67,17 @@ export class NardiPreviewPage implements OnInit {
   private readonly board = viewChild.required(NardiBoardComponent);
   private readonly route = inject(ActivatedRoute);
   scenario: PreviewScenario = 'stacks';
+  localSeat: NardiPlayerIndex = 0;
 
   ngOnInit(): void {
     const q = this.route.snapshot.queryParamMap.get('scenario') as PreviewScenario | null;
     if (q && ['initial', 'stacks', 'bar', 'bearoff', 'win', 'loss'].includes(q)) {
       this.scenario = q;
     }
+    const seatQ = this.route.snapshot.queryParamMap.get('asSeat');
+    if (seatQ === '1') this.localSeat = 1;
+    if (seatQ === '0') this.localSeat = 0;
+    // End-game loss as white was “opponent won”; as dark, flip so local still loses when needed.
     queueMicrotask(() => this.applyScenario(this.scenario));
   }
 
@@ -75,8 +87,13 @@ export class NardiPreviewPage implements OnInit {
     this.applyScenario(value);
   }
 
+  onSeat(ev: Event): void {
+    this.localSeat = Number((ev.target as HTMLSelectElement).value) === 1 ? 1 : 0;
+    this.applyScenario(this.scenario);
+  }
+
   private applyScenario(name: PreviewScenario): void {
-    this.board().setPreview(buildPreview(name));
+    this.board().setPreview(buildPreview(name, this.localSeat), this.localSeat);
   }
 }
 
@@ -132,7 +149,7 @@ function finishedBoard(): number[] {
   return points;
 }
 
-function buildPreview(name: PreviewScenario): LiveRoomView {
+function buildPreview(name: PreviewScenario, localSeat: NardiPlayerIndex): LiveRoomView {
   if (name === 'initial') {
     const board = createInitialBoard();
     return baseView({
@@ -142,6 +159,7 @@ function buildPreview(name: PreviewScenario): LiveRoomView {
       off0: board.off[0],
       off1: board.off[1],
       nardiPhase: 'WAITING_FOR_ROLL',
+      currentTurn: localSeat,
       dice: { d1: 0, d2: 0, rolled: false, remaining: [] },
       legalMoves: [],
     });
@@ -164,7 +182,14 @@ function buildPreview(name: PreviewScenario): LiveRoomView {
     points[5] = -5;
     points[6] = -8;
     points[12] = -15;
-    return baseView({ points, legalMoves: [{ from: 13, to: 9, die: 4, hit: false }] });
+    return baseView({
+      points,
+      currentTurn: localSeat,
+      legalMoves:
+        localSeat === 0
+          ? [{ from: 13, to: 9, die: 4, hit: false }]
+          : [{ from: 12, to: 16, die: 4, hit: false }],
+    });
   }
 
   if (name === 'bar') {
@@ -183,7 +208,11 @@ function buildPreview(name: PreviewScenario): LiveRoomView {
       bar1: 1,
       off0: 1,
       off1: 2,
-      legalMoves: [{ from: 0, to: 22, die: 4, hit: false }],
+      currentTurn: localSeat,
+      legalMoves:
+        localSeat === 0
+          ? [{ from: 0, to: 22, die: 4, hit: false }]
+          : [{ from: 0, to: 4, die: 4, hit: false }],
     });
   }
 
@@ -192,24 +221,25 @@ function buildPreview(name: PreviewScenario): LiveRoomView {
       points: finishedBoard(),
       phase: 'FINISHED',
       nardiPhase: 'GAME_OVER',
-      winnerSeat: 0,
+      winnerSeat: localSeat,
       matchId: 'preview-win',
-      off0: 15,
-      off1: 8,
+      off0: localSeat === 0 ? 15 : 8,
+      off1: localSeat === 1 ? 15 : 8,
       dice: { d1: 6, d2: 6, rolled: false, remaining: [] },
       legalMoves: [],
     });
   }
 
   if (name === 'loss') {
+    const winner = localSeat === 0 ? 1 : 0;
     return baseView({
       points: finishedBoard(),
       phase: 'FINISHED',
       nardiPhase: 'GAME_OVER',
-      winnerSeat: 1,
+      winnerSeat: winner,
       matchId: 'preview-loss',
-      off0: 8,
-      off1: 15,
+      off0: winner === 0 ? 15 : 8,
+      off1: winner === 1 ? 15 : 8,
       dice: { d1: 3, d2: 5, rolled: false, remaining: [] },
       legalMoves: [],
     });
@@ -232,6 +262,10 @@ function buildPreview(name: PreviewScenario): LiveRoomView {
     points,
     off0: 5,
     off1: 5,
-    legalMoves: [{ from: 4, to: 25, die: 4, hit: false }],
+    currentTurn: localSeat,
+    legalMoves:
+      localSeat === 0
+        ? [{ from: 4, to: 25, die: 4, hit: false }]
+        : [{ from: 21, to: 25, die: 4, hit: false }],
   });
 }

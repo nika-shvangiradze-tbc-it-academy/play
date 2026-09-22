@@ -373,38 +373,6 @@
 .point.top.target::after { top: calc(100% - var(--pip-reserve) * 0.35); }
 .point.bottom.target::after { top: calc(var(--pip-reserve) * 0.35); }
 
-/* Pip numbers live in a reserved tip zone — outside the stack height */
-.pip {
-  position: absolute;
-  z-index: 5;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100%;
-  text-align: center;
-  color: rgba(255, 241, 211, 0.48);
-  font: 600 clamp(0.5rem, calc(var(--point-width) * 0.22), 0.7rem) / 1 var(--font-body);
-  text-shadow: 0 1px 2px #160b07;
-  pointer-events: none;
-}
-.point.top .pip {
-  bottom: 0;
-  height: var(--pip-reserve);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  padding-bottom: 2px;
-  box-sizing: border-box;
-}
-.point.bottom .pip {
-  top: 0;
-  height: var(--pip-reserve);
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
-  padding-top: 2px;
-  box-sizing: border-box;
-}
-
 /* —— Checker stacks: fixed diameter, variable step from TS —— */
 .stack {
   --stack-size: var(--checker-size);
@@ -563,6 +531,8 @@
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
+.bar-far { grid-row: 1; }
+.bar-near { grid-row: 2; }
 .bar-zone .checker {
   --i: 0;
   position: absolute;
@@ -571,15 +541,15 @@
   aspect-ratio: 1;
   transform: translateX(-50%);
 }
-.bar-p1 .checker { top: calc(4px + var(--i) * var(--stack-step)); }
-.bar-p0 .checker { bottom: calc(4px + var(--i) * var(--stack-step)); }
+.bar-far .checker { top: calc(4px + var(--i) * var(--stack-step)); }
+.bar-near .checker { bottom: calc(4px + var(--i) * var(--stack-step)); }
 .bar-zone .count {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
 }
-.bar-p1 .count { top: 2px; }
-.bar-p0 .count { bottom: 2px; }
+.bar-far .count { top: 2px; }
+.bar-near .count { bottom: 2px; }
 
 .bar-mark {
   position: absolute;

@@ -43,14 +43,27 @@ export class LobbyPage {
     this.error.set(null);
     try {
       console.info(
-        '[lobby] createTable → POST /api/rooms',
+        '[create-room] UI click',
         environment.gameServerHttpUrl,
         environment.gameServerWsUrl,
       );
+      const health = await this.api.pingHealth();
+      if (!health.ok) {
+        throw new Error(
+          'Game server is not reachable on ' +
+            environment.gameServerHttpUrl +
+            '. From the repo root run `npm run dev` (web + server), or `npm run dev -w @georgian-games/game-server`.',
+        );
+      }
+      if (health.matchMakerReady === false) {
+        throw new Error('Game server is up but matchMaker is not READY yet — try again in a moment.');
+      }
+      console.info('[create-room] health ok → POST /api/rooms');
       const room = await this.api.createRoom(GameType.NARDI);
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {
         throw new Error('Server created the table but returned no seat reservation');
       }
+      console.info('[create-room] frontend response received', room.inviteCode, room.lifecycleTraceId);
       await this.session.enterWithReservation(room.reservation, {
         dbRoomId: room.roomId,
         inviteCode: room.inviteCode,
@@ -61,9 +74,10 @@ export class LobbyPage {
       if (!this.session.socketOpen()) {
         throw new Error('Connected to the table but the WebSocket closed immediately');
       }
+      console.info('[create-room] navigating', room.inviteCode);
       await this.router.navigate(['/room', room.inviteCode]);
     } catch (err) {
-      console.error('[lobby] createTable failed', err);
+      console.error('[create-room] failed', err);
       this.error.set(err instanceof Error ? err.message : 'Could not create table');
     } finally {
       this.busy.set(false);
@@ -82,6 +96,14 @@ export class LobbyPage {
     this.busy.set(true);
     this.error.set(null);
     try {
+      const health = await this.api.pingHealth();
+      if (!health.ok) {
+        throw new Error(
+          'Game server is not reachable on ' +
+            environment.gameServerHttpUrl +
+            '. From the repo root run `npm run dev`.',
+        );
+      }
       console.info('[lobby] joinTable → POST /api/rooms/join', code);
       const room = await this.api.joinByCode(code);
       if (!room?.reservation?.sessionId || !room.reservation.room?.roomId) {

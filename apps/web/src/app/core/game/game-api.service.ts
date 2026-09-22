@@ -24,8 +24,11 @@ export class GameApiService {
     timeoutMs = HTTP_TIMEOUT_MS,
   ): Promise<T> {
     const url = `${environment.gameServerHttpUrl}${path}`;
+    const method = init.method ?? 'GET';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const t0 = Date.now();
+    console.info('[create-room] HTTP request start', method, url);
     try {
       const res = await fetch(url, { ...init, signal: controller.signal });
       let body: Record<string, unknown> = {};
@@ -34,27 +37,54 @@ export class GameApiService {
       } catch {
         /* non-JSON error body */
       }
+      console.info(
+        '[create-room] HTTP response received',
+        method,
+        path,
+        res.status,
+        `elapsedMs=${Date.now() - t0}`,
+      );
       if (!res.ok) {
         const message =
           typeof body['message'] === 'string'
             ? body['message']
             : `Request failed (${res.status})`;
-        console.error('[game-api]', init.method ?? 'GET', path, res.status, body);
+        console.error('[game-api]', method, path, res.status, body);
         throw new Error(message);
       }
       return body as T;
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
-        console.error('[game-api] timeout', path, url);
+        console.error('[game-api] timeout', path, url, `elapsedMs=${Date.now() - t0}`);
         throw new Error(
           'Game server timed out. It may be waking up — wait a few seconds and try again.',
         );
       }
       if (err instanceof TypeError) {
-        console.error('[game-api] network', path, url, err);
-        throw new Error('Cannot reach the game server. Check your connection and try again.');
+        console.error('[game-api] network', path, url, err, `elapsedMs=${Date.now() - t0}`);
+        const localHint = /localhost|127\.0\.0\.1/i.test(url)
+          ? ' Start the game server (repo root: npm run dev) so port 2567 is listening.'
+          : '';
+        throw new Error(`Cannot reach the game server.${localHint}`);
       }
       throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Lightweight readiness probe used before create/join. */
+  async pingHealth(timeoutMs = 3_000): Promise<{ ok: boolean; matchMakerReady?: boolean }> {
+    const url = `${environment.gameServerHttpUrl}/api/health`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) return { ok: false };
+      const body = (await res.json()) as { ok?: boolean; matchMakerReady?: boolean };
+      return { ok: body.ok === true, matchMakerReady: body.matchMakerReady };
+    } catch {
+      return { ok: false };
     } finally {
       clearTimeout(timer);
     }
