@@ -79,6 +79,12 @@ describe('computeStackLayout', () => {
     }
   });
 
+  it('empty count yields zero visible checkers (no phantom bar pieces)', () => {
+    const layout = computeStackLayout(0, size, stackHeight);
+    expect(layout.visible).toBe(0);
+    expect(layout.badge).toBe(0);
+  });
+
   it('keeps neighboring-point safety via diameter < point width', () => {
     const geo = computeBoardGeometry(375, 375 / BOARD_ASPECT);
     const layout = computeStackLayout(5, geo.checkerSize, geo.stackHeight);

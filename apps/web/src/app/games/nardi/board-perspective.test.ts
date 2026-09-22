@@ -74,4 +74,27 @@ describe('board perspective mapping', () => {
       }
     }
   });
+
+  it('maps White and Dark bar-entry destinations correctly under both cameras', () => {
+    // White die 1–6 → canonical 24..19
+    const whiteEntries = [24, 23, 22, 21, 20, 19];
+    // Dark die 1–6 → canonical 1..6
+    const darkEntries = [1, 2, 3, 4, 5, 6];
+
+    for (const to of whiteEntries) {
+      expect(toLogicalPoint(toDisplayPoint(to, 'white'), 'white')).toBe(to);
+      expect(toLogicalPoint(toDisplayPoint(to, 'black'), 'black')).toBe(to);
+    }
+    for (const to of darkEntries) {
+      expect(toLogicalPoint(toDisplayPoint(to, 'white'), 'white')).toBe(to);
+      expect(toLogicalPoint(toDisplayPoint(to, 'black'), 'black')).toBe(to);
+    }
+
+    // Dark camera: white entry 22 appears on display slot 3; tap sends logical 22.
+    expect(toDisplayPoint(22, 'black')).toBe(3);
+    expect(toLogicalPoint(3, 'black')).toBe(22);
+    // Dark camera: dark entry 3 appears on display slot 22; tap sends logical 3.
+    expect(toDisplayPoint(3, 'black')).toBe(22);
+    expect(toLogicalPoint(22, 'black')).toBe(3);
+  });
 });

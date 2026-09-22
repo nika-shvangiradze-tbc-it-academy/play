@@ -166,6 +166,7 @@ export class NardiRoom extends BaseGameRoom {
       rolled: g.dice.rolled,
       remaining: g.dice.remaining,
       legalMoves: g.legalMoves.length,
+      bar: g.board.bar,
       turnNumber: g.turnNumber,
       gameOver: g.phase === NardiPhase.GAME_OVER,
     });

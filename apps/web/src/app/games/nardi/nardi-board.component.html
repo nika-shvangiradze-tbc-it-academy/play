@@ -107,7 +107,11 @@
               }
             </div>
 
-            <div class="center-bar" [class.selected]="selectedFrom() === BAR">
+            <div
+              class="center-bar"
+              [class.selected]="selectedFrom() === BAR"
+              [class.must-enter]="mustEnterFromBar()"
+            >
               @for (seat of barOrder(); track seat; let isFar = $first) {
                 <button
                   class="bar-zone"
@@ -115,9 +119,11 @@
                   [class.bar-near]="!isFar"
                   [class.bar-p0]="seat === 0"
                   [class.bar-p1]="seat === 1"
+                  [class.has-checkers]="barCount(seat) > 0"
+                  [class.must-enter]="isBarMustEnter(seat)"
                   type="button"
                   (click)="onBarClick(seat)"
-                  [attr.aria-label]="(seat === 0 ? 'თეთრის' : 'შავის') + ' დატყვევებული ქვები'"
+                  [attr.aria-label]="(seat === 0 ? 'თეთრის' : 'შავის') + ' ბარის ქვები'"
                   [style.--stack-size.px]="barStackLayout(barCount(seat)).size"
                   [style.--stack-step.px]="barStackLayout(barCount(seat)).step"
                   [style.--stack-visible]="barStackLayout(barCount(seat)).visible"
@@ -131,7 +137,7 @@
                     ></span>
                   }
                   @if (barBadge(barCount(seat)); as n) {
-                    @if (n) { <span class="count">{{ n }}</span> }
+                    @if (n) { <span class="count">×{{ n }}</span> }
                   }
                 </button>
                 @if (isFar) {

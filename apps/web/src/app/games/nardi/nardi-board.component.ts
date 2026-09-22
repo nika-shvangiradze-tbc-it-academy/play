@@ -61,10 +61,14 @@ export class NardiBoardComponent {
   readonly previewLocalSeat = signal<NardiPlayerIndex>(0);
 
   readonly selectedFrom = signal<number | null>(null);
+  /** Short-lived Georgian hint after a blocked bar roll auto-pass. */
+  readonly barHint = signal<string | null>(null);
   readonly expanded = signal(false);
   readonly geometry = signal<BoardGeometry>(defaultGeometry());
   readonly viewportW = signal(typeof window !== 'undefined' ? window.innerWidth : 1024);
   readonly viewportH = signal(typeof window !== 'undefined' ? window.innerHeight : 768);
+  private barHintTimer: ReturnType<typeof setTimeout> | null = null;
+  private prevBarSnap: { myTurn: boolean; phase: string; turnNumber: number } | null = null;
 
   /** End-game overlay (win/loss). Driven once per finished matchId. */
   readonly resultOpen = signal(false);
@@ -138,11 +142,26 @@ export class NardiBoardComponent {
   /** Center bar: [far/top player, near/bottom player]. */
   readonly barOrder = computed(() => barPlayerOrder(this.perspective()));
 
+  readonly myBarCount = computed(() => this.barCount(this.localSeatNumber()));
+
+  readonly mustEnterFromBar = computed(() => {
+    if (!this.isMyTurn() || this.isMatchFinished()) return false;
+    const v = this.view();
+    if (!v || v.nardiPhase !== 'WAITING_FOR_MOVE') return false;
+    if (this.myBarCount() <= 0) return false;
+    return (v.legalMoves ?? []).some((m) => m.from === BAR_POINT);
+  });
+
   readonly statusText = computed(() => {
+    const hint = this.barHint();
+    if (hint) return hint;
     const v = this.view();
     if (!v) return '';
     if (v.phase === 'FINISHED' || v.nardiPhase === 'GAME_OVER') {
       return 'თამაში დასრულდა';
+    }
+    if (this.mustEnterFromBar()) {
+      return 'კენჭი ბარზეა — ჯერ თამაშში უნდა დააბრუნოთ';
     }
     const turnPlayer = v.seats.find((s) => s.seatNumber === v.currentTurn);
     if (v.nardiPhase === 'WAITING_FOR_ROLL') {
@@ -179,9 +198,15 @@ export class NardiBoardComponent {
   });
 
   readonly legalTargets = computed(() => {
-    const from = this.selectedFrom();
     const moves = this.view()?.legalMoves ?? [];
-    if (from === null) return new Set<number>();
+    const from = this.selectedFrom();
+    if (from === null) {
+      // Mandatory bar entry: highlight destinations without requiring a bar tap.
+      if (this.mustEnterFromBar()) {
+        return new Set(moves.filter((m) => m.from === BAR_POINT).map((m) => m.to));
+      }
+      return new Set<number>();
+    }
     return new Set(moves.filter((m) => m.from === from).map((m) => m.to));
   });
 
@@ -245,6 +270,46 @@ export class NardiBoardComponent {
       this.colyseus.pass();
     });
 
+    // Bar re-entry UX: auto-select BAR origin and surface blocked-entry auto-pass hints.
+    effect(() => {
+      const v = this.view();
+      if (!v) return;
+
+      const seat = this.localSeatNumber();
+      const myBar = seat === 0 ? v.bar0 : v.bar1;
+      const myTurn = this.isMyTurn();
+      const snap = {
+        myTurn,
+        phase: v.nardiPhase,
+        turnNumber: v.turnNumber,
+      };
+
+      if (
+        this.prevBarSnap &&
+        this.prevBarSnap.myTurn &&
+        this.prevBarSnap.phase === 'WAITING_FOR_ROLL' &&
+        !myTurn &&
+        v.nardiPhase === 'WAITING_FOR_ROLL' &&
+        v.phase === 'PLAYING' &&
+        myBar > 0 &&
+        v.turnNumber > this.prevBarSnap.turnNumber &&
+        (v.dice.d1 > 0 || v.dice.d2 > 0)
+      ) {
+        // Rolled while on bar with zero legal entries → server auto-passed.
+        this.showBarHint('კენჭის დაბრუნება შეუძლებელია — სვლა გადადის მოწინააღმდეგეზე');
+      }
+      this.prevBarSnap = snap;
+
+      if (v.nardiPhase === 'WAITING_FOR_MOVE' && myTurn && myBar > 0) {
+        const hasBarMoves = (v.legalMoves ?? []).some((m) => m.from === BAR_POINT);
+        if (hasBarMoves) {
+          this.selectedFrom.set(BAR_POINT);
+        }
+      } else if (this.selectedFrom() === BAR_POINT && myBar <= 0) {
+        this.selectedFrom.set(null);
+      }
+    });
+
     // End-game result: trigger once per finished match for the local user.
     effect(() => {
       const v = this.view();
@@ -274,9 +339,19 @@ export class NardiBoardComponent {
       this.clearExpandedChrome();
       this.teardownCelebration();
       if (this.resultCardTimer) clearTimeout(this.resultCardTimer);
+      if (this.barHintTimer) clearTimeout(this.barHintTimer);
       void this.exitFullscreenSafe();
       void this.unlockOrientationSafe();
     });
+  }
+
+  private showBarHint(message: string): void {
+    this.barHint.set(message);
+    if (this.barHintTimer) clearTimeout(this.barHintTimer);
+    this.barHintTimer = setTimeout(() => {
+      this.barHint.set(null);
+      this.barHintTimer = null;
+    }, 3200);
   }
 
   /** Used by preview page only. */
@@ -418,7 +493,8 @@ export class NardiBoardComponent {
   barStackLayout(count: number) {
     const g = this.geometry();
     const barStackH = Math.max(g.stackHeight * 0.85, g.checkerSize);
-    return computeStackLayout(count || 1, g.checkerSize * 0.88, barStackH);
+    // Never coerce empty bar to 1 — that rendered phantom "hit" checkers.
+    return computeStackLayout(Math.max(0, count), g.checkerSize * 0.88, barStackH);
   }
 
   barStackStyle(count: number): Record<string, string> {
@@ -432,6 +508,11 @@ export class NardiBoardComponent {
 
   barBadge(count: number): number {
     return this.barStackLayout(count).badge;
+  }
+
+  /** True when this seat's bar zone should show the mandatory re-entry pulse. */
+  isBarMustEnter(player: NardiPlayerIndex): boolean {
+    return this.mustEnterFromBar() && this.localSeatNumber() === player;
   }
 
   isSelectable(point: number): boolean {
@@ -463,6 +544,16 @@ export class NardiBoardComponent {
     const selected = this.selectedFrom();
     const moves = this.view()?.legalMoves ?? [];
 
+    // One-tap bar re-entry: destination click while bar has absolute priority.
+    if (
+      this.mustEnterFromBar() &&
+      moves.some((m) => m.from === BAR_POINT && m.to === logical)
+    ) {
+      this.colyseus.moveChecker(BAR_POINT, logical);
+      this.selectedFrom.set(null);
+      return;
+    }
+
     if (selected !== null && this.legalTargets().has(logical)) {
       this.colyseus.moveChecker(selected, logical);
       this.selectedFrom.set(null);
@@ -491,9 +582,13 @@ export class NardiBoardComponent {
 
   onBarClick(player: 0 | 1): void {
     if (this.isMatchFinished()) return;
-    if (this.previewView()) return;
+    if (this.previewView()) {
+      if (this.barCount(player) > 0) this.selectedFrom.set(BAR_POINT);
+      return;
+    }
     if (this.mySeat()?.seatNumber !== player) return;
     if (!this.isMyTurn()) return;
+    if (this.barCount(player) <= 0) return;
     const moves = this.view()?.legalMoves ?? [];
     if (moves.some((m) => m.from === BAR_POINT)) {
       this.selectedFrom.set(BAR_POINT);

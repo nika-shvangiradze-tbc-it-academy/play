@@ -122,7 +122,16 @@ export function homeBoardEnd(player: NardiPlayerIndex): number {
   return player === 0 ? 6 : 24;
 }
 
+/**
+ * Canonical bar-entry destination for a die face.
+ * White (0) enters opponent home 24..19 via 25 − die.
+ * Dark (1) enters opponent home 1..6 via die.
+ */
 export function entryPoint(player: NardiPlayerIndex, die: number): number {
-  // White enters from bar onto 25-die (24..19), black onto die (1..6)
   return player === 0 ? 25 - die : die;
+}
+
+/** Alias preferred by call sites / docs — same as {@link entryPoint}. */
+export function getBarEntryPoint(player: NardiPlayerIndex, die: number): number {
+  return entryPoint(player, die);
 }

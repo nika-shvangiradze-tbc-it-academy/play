@@ -202,6 +202,9 @@ function buildPreview(name: PreviewScenario, localSeat: NardiPlayerIndex): LiveR
     points[12] = -4;
     points[17] = -3;
     points[19] = -3;
+    // White die 4 → 21; Dark die 4 → 4. Leave those points open for entry highlights.
+    points[21] = 0;
+    points[4] = 0;
     return baseView({
       points,
       bar0: 2,
@@ -209,10 +212,17 @@ function buildPreview(name: PreviewScenario, localSeat: NardiPlayerIndex): LiveR
       off0: 1,
       off1: 2,
       currentTurn: localSeat,
+      dice: { d1: 4, d2: 3, rolled: true, remaining: [4, 3] },
       legalMoves:
         localSeat === 0
-          ? [{ from: 0, to: 22, die: 4, hit: false }]
-          : [{ from: 0, to: 4, die: 4, hit: false }],
+          ? [
+              { from: 0, to: 21, die: 4, hit: false },
+              { from: 0, to: 22, die: 3, hit: false },
+            ]
+          : [
+              { from: 0, to: 4, die: 4, hit: false },
+              { from: 0, to: 3, die: 3, hit: false },
+            ],
     });
   }
 

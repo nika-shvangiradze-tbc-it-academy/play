@@ -113,7 +113,8 @@ export function applyMove(board: NardiBoardState, player: NardiPlayerIndex, move
   if (move.to === OFF_POINT) {
     next.off[player] += 1;
   } else {
-    if (move.hit) {
+    // Authoritative hit detection from board state (never trust a stale hit flag).
+    if (isHit(next, player, move.to)) {
       const opponent: NardiPlayerIndex = player === 0 ? 1 : 0;
       next.points[move.to] = 0;
       next.bar[opponent] += 1;
@@ -124,7 +125,10 @@ export function applyMove(board: NardiBoardState, player: NardiPlayerIndex, move
   return next;
 }
 
-/** Enumerate legal moves for a single die value. */
+/**
+ * Enumerate legal moves for a single die value.
+ * While bar[player] > 0, ONLY bar-entry moves are generated (absolute priority).
+ */
 export function legalMovesForDie(
   board: NardiBoardState,
   player: NardiPlayerIndex,
@@ -133,7 +137,7 @@ export function legalMovesForDie(
   const moves: NardiMove[] = [];
   const dir = direction(player);
 
-  // Must enter from bar first
+  // Absolute bar priority: no board / bear-off moves until bar is empty.
   if (board.bar[player] > 0) {
     const to = entryPoint(player, die);
     if (canLand(board, player, to)) {

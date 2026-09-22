@@ -90,4 +90,25 @@ test.describe('Nardi board perspective', () => {
     expect(whiteLocal).toContain('tatulika01');
     expect(darkLocal).toContain('black');
   });
+
+  test('bar re-entry auto-highlights destinations for white and dark', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await openPreview(page, 0, 'bar');
+
+    await expect(page.locator('.center-bar')).toHaveClass(/must-enter/);
+    await expect(page.locator('.bar-zone.must-enter .checker').first()).toBeVisible();
+    await expect(page.locator('.point.target')).toHaveCount(2);
+    await expect(page.getByText('კენჭი ბარზეა')).toBeVisible();
+    await page.screenshot({ path: path.join(OUT, 'white-bar-entry.png'), fullPage: true });
+
+    await openPreview(page, 1, 'bar');
+    await expect(page.locator('.center-bar')).toHaveClass(/must-enter/);
+    await expect(page.locator('.bar-zone.bar-near.must-enter')).toHaveClass(/bar-p1/);
+    await expect(page.locator('.point.target')).toHaveCount(2);
+    await page.screenshot({ path: path.join(OUT, 'dark-bar-entry.png'), fullPage: true });
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await openPreview(page, 0, 'bar');
+    await page.screenshot({ path: path.join(OUT, 'white-bar-portrait.png'), fullPage: true });
+  });
 });
