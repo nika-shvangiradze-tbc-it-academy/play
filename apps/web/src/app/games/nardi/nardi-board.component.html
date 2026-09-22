@@ -326,3 +326,82 @@
     </p>
   </section>
 }
+
+@if (resultOpen()) {
+  <div
+    class="endgame-layer"
+    [class.endgame-win]="resultKind() === 'win'"
+    [class.endgame-loss]="resultKind() === 'loss'"
+    role="dialog"
+    aria-modal="true"
+    [attr.aria-labelledby]="resultKind() === 'win' ? 'nardi-win-title' : 'nardi-loss-title'"
+  >
+    <div class="endgame-backdrop" aria-hidden="true"></div>
+    <canvas #celebrationCanvas class="endgame-canvas" aria-hidden="true"></canvas>
+
+    <div class="endgame-card" [class.endgame-card-in]="resultCardVisible()">
+      @if (resultKind() === 'win') {
+        <div class="endgame-ornament" aria-hidden="true">
+          <svg class="trophy-icon" viewBox="0 0 64 64" fill="none">
+            <path
+              d="M18 10h28v6c0 8.5-5.4 15.6-13 18.2V40h8v4H23v-4h8v-5.8C23.4 31.6 18 24.5 18 16V10Z"
+              fill="url(#trophyGrad)"
+              stroke="#e8d5a3"
+              stroke-width="1.4"
+            />
+            <path d="M18 14H10c0 8 4 12 8 13V14Z" stroke="#d4af6a" stroke-width="1.4" fill="rgba(212,175,106,.15)" />
+            <path d="M46 14h8c0 8-4 12-8 13V14Z" stroke="#d4af6a" stroke-width="1.4" fill="rgba(212,175,106,.15)" />
+            <rect x="20" y="44" width="24" height="4" rx="1" fill="#c99c51" />
+            <rect x="24" y="48" width="16" height="6" rx="1.5" fill="#b68a46" stroke="#e8d5a3" stroke-width="1" />
+            <defs>
+              <linearGradient id="trophyGrad" x1="18" y1="10" x2="48" y2="44">
+                <stop stop-color="#f4e4bc" />
+                <stop offset="0.45" stop-color="#d4af6a" />
+                <stop offset="1" stop-color="#9a6d31" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <p class="endgame-kicker">გილოცავთ!</p>
+        <h2 id="nardi-win-title" class="endgame-title">თქვენ გაიმარჯვეთ</h2>
+        @if (winnerUsername()) {
+          <p class="endgame-name">{{ winnerUsername() }}</p>
+        }
+        <p class="endgame-sub">შესანიშნავი თამაში!</p>
+      } @else {
+        <div class="endgame-ornament loss" aria-hidden="true">
+          <svg class="laurel-icon" viewBox="0 0 64 64" fill="none">
+            <path
+              d="M32 52c-10-6-16-16-16-28 6 2 12 8 16 16 4-8 10-14 16-16 0 12-6 22-16 28Z"
+              stroke="#c99c51"
+              stroke-width="1.5"
+              fill="rgba(139,58,58,.22)"
+            />
+            <circle cx="32" cy="22" r="5" fill="#b68a46" stroke="#e8d5a3" stroke-width="1.2" />
+          </svg>
+        </div>
+        <h2 id="nardi-loss-title" class="endgame-title loss">სამწუხაროდ, თქვენ დამარცხდით</h2>
+        <p class="endgame-sub">წარმატებები შემდეგ თამაშში!</p>
+      }
+
+      <div class="endgame-actions">
+        <button
+          type="button"
+          class="btn endgame-primary"
+          [disabled]="endGameBusy()"
+          (click)="onNewGame()"
+        >
+          ახალი თამაში
+        </button>
+        <button
+          type="button"
+          class="btn endgame-secondary"
+          [disabled]="endGameBusy()"
+          (click)="onExitGames()"
+        >
+          თამაშებიდან გასვლა
+        </button>
+      </div>
+    </div>
+  </div>
+}

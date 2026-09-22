@@ -1,7 +1,10 @@
-import { Component, OnInit, viewChild } from '@angular/core';
+import { Component, OnInit, inject, viewChild } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { createInitialBoard } from '@georgian-games/shared';
 import { NardiBoardComponent } from '../../games/nardi/nardi-board.component';
 import type { LiveRoomView } from '../../core/game/colyseus.service';
+
+type PreviewScenario = 'initial' | 'stacks' | 'bar' | 'bearoff' | 'win' | 'loss';
 
 /** Dev-only board preview for layout / viewport QA (no auth, no network). */
 @Component({
@@ -18,6 +21,8 @@ import type { LiveRoomView } from '../../core/game/colyseus.service';
             <option value="stacks">Stress stacks</option>
             <option value="bar">Bar + mid-game</option>
             <option value="bearoff">Bearing off</option>
+            <option value="win">End — local win</option>
+            <option value="loss">End — local loss</option>
           </select>
         </label>
         <span class="hint">Visual QA — not a live match</span>
@@ -53,19 +58,24 @@ import type { LiveRoomView } from '../../core/game/colyseus.service';
 })
 export class NardiPreviewPage implements OnInit {
   private readonly board = viewChild.required(NardiBoardComponent);
-  scenario: 'initial' | 'stacks' | 'bar' | 'bearoff' = 'stacks';
+  private readonly route = inject(ActivatedRoute);
+  scenario: PreviewScenario = 'stacks';
 
   ngOnInit(): void {
+    const q = this.route.snapshot.queryParamMap.get('scenario') as PreviewScenario | null;
+    if (q && ['initial', 'stacks', 'bar', 'bearoff', 'win', 'loss'].includes(q)) {
+      this.scenario = q;
+    }
     queueMicrotask(() => this.applyScenario(this.scenario));
   }
 
   onScenario(ev: Event): void {
-    const value = (ev.target as HTMLSelectElement).value as typeof this.scenario;
+    const value = (ev.target as HTMLSelectElement).value as PreviewScenario;
     this.scenario = value;
     this.applyScenario(value);
   }
 
-  private applyScenario(name: typeof this.scenario): void {
+  private applyScenario(name: PreviewScenario): void {
     this.board().setPreview(buildPreview(name));
   }
 }
@@ -79,7 +89,7 @@ function baseView(partial: Partial<LiveRoomView> & { points: number[] }): LiveRo
     hostUserId: 'p0',
     maxPlayers: 2,
     matchId: 'preview',
-    nardiPhase: 'MOVING',
+    nardiPhase: 'WAITING_FOR_MOVE',
     currentTurn: 0,
     turnNumber: 3,
     winnerSeat: -1,
@@ -91,7 +101,7 @@ function baseView(partial: Partial<LiveRoomView> & { points: number[] }): LiveRo
     seats: [
       {
         userId: 'p0',
-        username: 'White',
+        username: 'tatulika01',
         seatNumber: 0,
         isReady: true,
         connected: true,
@@ -114,7 +124,15 @@ function baseView(partial: Partial<LiveRoomView> & { points: number[] }): LiveRo
   };
 }
 
-function buildPreview(name: 'initial' | 'stacks' | 'bar' | 'bearoff'): LiveRoomView {
+function finishedBoard(): number[] {
+  const points = new Array<number>(25).fill(0);
+  points[6] = 2;
+  points[19] = -4;
+  points[20] = -3;
+  return points;
+}
+
+function buildPreview(name: PreviewScenario): LiveRoomView {
   if (name === 'initial') {
     const board = createInitialBoard();
     return baseView({
@@ -166,6 +184,34 @@ function buildPreview(name: 'initial' | 'stacks' | 'bar' | 'bearoff'): LiveRoomV
       off0: 1,
       off1: 2,
       legalMoves: [{ from: 0, to: 22, die: 4, hit: false }],
+    });
+  }
+
+  if (name === 'win') {
+    return baseView({
+      points: finishedBoard(),
+      phase: 'FINISHED',
+      nardiPhase: 'GAME_OVER',
+      winnerSeat: 0,
+      matchId: 'preview-win',
+      off0: 15,
+      off1: 8,
+      dice: { d1: 6, d2: 6, rolled: false, remaining: [] },
+      legalMoves: [],
+    });
+  }
+
+  if (name === 'loss') {
+    return baseView({
+      points: finishedBoard(),
+      phase: 'FINISHED',
+      nardiPhase: 'GAME_OVER',
+      winnerSeat: 1,
+      matchId: 'preview-loss',
+      off0: 8,
+      off1: 15,
+      dice: { d1: 3, d2: 5, rolled: false, remaining: [] },
+      legalMoves: [],
     });
   }
 

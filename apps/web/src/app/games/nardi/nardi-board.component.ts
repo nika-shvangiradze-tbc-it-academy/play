@@ -10,10 +10,12 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { fromEvent } from 'rxjs';
 import { ColyseusService, type LiveRoomView } from '../../core/game/colyseus.service';
 import { AuthService } from '../../core/auth/auth.service';
+import { GameSessionService } from '../../core/game/game-session.service';
 import { BAR_POINT, OFF_POINT } from '@georgian-games/shared';
 import {
   type BoardGeometry,
@@ -23,6 +25,10 @@ import {
   geometryCssVars,
   stackCssVars,
 } from './board-geometry';
+import {
+  prefersReducedMotion,
+  startEndGameCelebration,
+} from './end-game-celebration';
 
 @Component({
   selector: 'app-nardi-board',
@@ -38,6 +44,8 @@ import {
 export class NardiBoardComponent {
   readonly colyseus = inject(ColyseusService);
   readonly auth = inject(AuthService);
+  private readonly session = inject(GameSessionService);
+  private readonly router = inject(Router);
   private readonly hostEl = inject(ElementRef<HTMLElement>);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -50,12 +58,23 @@ export class NardiBoardComponent {
   readonly viewportW = signal(typeof window !== 'undefined' ? window.innerWidth : 1024);
   readonly viewportH = signal(typeof window !== 'undefined' ? window.innerHeight : 768);
 
+  /** End-game overlay (win/loss). Driven once per finished matchId. */
+  readonly resultOpen = signal(false);
+  readonly resultKind = signal<'win' | 'loss' | null>(null);
+  readonly resultCardVisible = signal(false);
+  readonly endGameBusy = signal(false);
+
   private readonly boardStage = viewChild<ElementRef<HTMLElement>>('boardStage');
+  private readonly celebrationCanvas = viewChild<ElementRef<HTMLCanvasElement>>('celebrationCanvas');
   private resizeObserver: ResizeObserver | null = null;
   private measureRaf = 0;
   /** Prevents double-submit of roll / recovery pass while waiting for server state. */
   private rollLock = false;
   private passRecoveryKey: string | null = null;
+  private handledResultKey: string | null = null;
+  private sawLivePlay = false;
+  private stopCelebration: (() => void) | null = null;
+  private resultCardTimer: ReturnType<typeof setTimeout> | null = null;
 
   readonly view = computed(() => this.previewView() ?? this.colyseus.view());
   readonly mySeat = computed(() => {
@@ -85,14 +104,40 @@ export class NardiBoardComponent {
     const v = this.view();
     if (!v) return '';
     if (v.phase === 'FINISHED' || v.nardiPhase === 'GAME_OVER') {
-      const winner = v.seats.find((s) => s.seatNumber === v.winnerSeat);
-      return winner ? `${winner.username} wins!` : 'Match finished';
+      return 'თამაში დასრულდა';
     }
     const turnPlayer = v.seats.find((s) => s.seatNumber === v.currentTurn);
     if (v.nardiPhase === 'WAITING_FOR_ROLL') {
       return `${turnPlayer?.username ?? 'Player'} — roll dice`;
     }
     return `${turnPlayer?.username ?? 'Player'} — move`;
+  });
+
+  readonly isMatchFinished = computed(() => {
+    const v = this.view();
+    if (!v) return false;
+    return v.phase === 'FINISHED' || v.nardiPhase === 'GAME_OVER';
+  });
+
+  /** Local player outcome from authoritative winnerSeat + seat.userId (not username). */
+  readonly localOutcome = computed<'win' | 'loss' | null>(() => {
+    if (!this.isMatchFinished()) return null;
+    const v = this.view();
+    if (!v || v.winnerSeat < 0) return null;
+    const winner = v.seats.find((s) => s.seatNumber === v.winnerSeat);
+    if (!winner?.userId) return null;
+    // Prefer auth user id in live play; in preview use seat 0 as the local player.
+    const myId = this.previewView()
+      ? this.mySeat()?.userId
+      : (this.auth.user()?.id ?? this.mySeat()?.userId ?? null);
+    if (!myId) return null;
+    return winner.userId === myId ? 'win' : 'loss';
+  });
+
+  readonly winnerUsername = computed(() => {
+    const v = this.view();
+    if (!v || v.winnerSeat < 0) return '';
+    return v.seats.find((s) => s.seatNumber === v.winnerSeat)?.username ?? '';
   });
 
   readonly legalTargets = computed(() => {
@@ -162,10 +207,35 @@ export class NardiBoardComponent {
       this.colyseus.pass();
     });
 
+    // End-game result: trigger once per finished match for the local user.
+    effect(() => {
+      const v = this.view();
+      if (!v) return;
+
+      if (v.phase === 'PLAYING' && v.nardiPhase !== 'GAME_OVER') {
+        this.sawLivePlay = true;
+      }
+
+      const finished = v.phase === 'FINISHED' || v.nardiPhase === 'GAME_OVER';
+      if (!finished || v.winnerSeat < 0) return;
+
+      const outcome = this.localOutcome();
+      if (!outcome) return;
+
+      const key = `${v.matchId || v.dbRoomId}:${v.winnerSeat}:${outcome}`;
+      if (this.handledResultKey === key) return;
+      this.handledResultKey = key;
+
+      const celebrateFull = outcome === 'win' && (this.sawLivePlay || !!this.previewView());
+      this.openResultExperience(outcome, celebrateFull);
+    });
+
     this.destroyRef.onDestroy(() => {
       if (this.measureRaf) cancelAnimationFrame(this.measureRaf);
       this.resizeObserver?.disconnect();
       this.clearExpandedChrome();
+      this.teardownCelebration();
+      if (this.resultCardTimer) clearTimeout(this.resultCardTimer);
       void this.exitFullscreenSafe();
       void this.unlockOrientationSafe();
     });
@@ -173,7 +243,86 @@ export class NardiBoardComponent {
 
   /** Used by preview page only. */
   setPreview(view: LiveRoomView | null): void {
+    this.teardownCelebration();
+    if (this.resultCardTimer) clearTimeout(this.resultCardTimer);
+    this.resultCardTimer = null;
+    this.handledResultKey = null;
+    this.resultOpen.set(false);
+    this.resultCardVisible.set(false);
+    this.resultKind.set(null);
+    this.sawLivePlay = false;
     this.previewView.set(view);
+  }
+
+  private openResultExperience(kind: 'win' | 'loss', celebrateFull: boolean): void {
+    this.selectedFrom.set(null);
+    this.resultKind.set(kind);
+    this.resultOpen.set(true);
+    this.resultCardVisible.set(false);
+
+    const reduced = prefersReducedMotion();
+    const showCardDelay = kind === 'win' && celebrateFull && !reduced ? 600 : 80;
+
+    if (kind === 'win' && celebrateFull && !reduced) {
+      // Wait until the canvas is in the DOM (*resultOpen).
+      queueMicrotask(() => {
+        requestAnimationFrame(() => {
+          const canvas = this.celebrationCanvas()?.nativeElement;
+          if (!canvas) return;
+          this.teardownCelebration();
+          this.stopCelebration = startEndGameCelebration(canvas, {
+            mode: 'victory',
+            intensity: 'full',
+            reducedMotion: false,
+          });
+        });
+      });
+    } else {
+      this.teardownCelebration();
+    }
+
+    if (this.resultCardTimer) clearTimeout(this.resultCardTimer);
+    this.resultCardTimer = setTimeout(() => {
+      this.resultCardVisible.set(true);
+      this.resultCardTimer = null;
+    }, showCardDelay);
+  }
+
+  private teardownCelebration(): void {
+    this.stopCelebration?.();
+    this.stopCelebration = null;
+  }
+
+  async onNewGame(): Promise<void> {
+    if (this.endGameBusy()) return;
+    this.endGameBusy.set(true);
+    try {
+      this.teardownCelebration();
+      if (this.previewView()) {
+        this.setPreview(null);
+        return;
+      }
+      await this.session.leave();
+      await this.router.navigateByUrl('/lobby');
+    } finally {
+      this.endGameBusy.set(false);
+    }
+  }
+
+  async onExitGames(): Promise<void> {
+    if (this.endGameBusy()) return;
+    this.endGameBusy.set(true);
+    try {
+      this.teardownCelebration();
+      if (this.previewView()) {
+        this.setPreview(null);
+        return;
+      }
+      await this.session.leave();
+      await this.router.navigateByUrl('/lobby');
+    } finally {
+      this.endGameBusy.set(false);
+    }
   }
 
   checkersAt(point: number): { player: 0 | 1; count: number } | null {
@@ -224,6 +373,7 @@ export class NardiBoardComponent {
   }
 
   isSelectable(point: number): boolean {
+    if (this.isMatchFinished()) return false;
     if (!this.isMyTurn()) return false;
     if (this.mySeat()?.seatNumber === undefined && !this.previewView()) return false;
     const moves = this.view()?.legalMoves ?? [];
@@ -231,10 +381,12 @@ export class NardiBoardComponent {
   }
 
   isTarget(point: number): boolean {
+    if (this.isMatchFinished()) return false;
     return this.legalTargets().has(point);
   }
 
   onPointClick(point: number): void {
+    if (this.isMatchFinished()) return;
     if (!this.isMyTurn()) return;
     if (this.previewView()) {
       this.selectedFrom.set(this.selectedFrom() === point ? null : point);
@@ -259,6 +411,7 @@ export class NardiBoardComponent {
   }
 
   onBarClick(player: 0 | 1): void {
+    if (this.isMatchFinished()) return;
     if (this.previewView()) return;
     if (this.mySeat()?.seatNumber !== player) return;
     if (!this.isMyTurn()) return;
@@ -269,6 +422,7 @@ export class NardiBoardComponent {
   }
 
   bearOff(): void {
+    if (this.isMatchFinished()) return;
     if (this.previewView()) return;
     const from = this.selectedFrom();
     if (from === null) return;
@@ -278,12 +432,12 @@ export class NardiBoardComponent {
   }
 
   canBearOff(): boolean {
-    if (this.previewView()) return false;
+    if (this.previewView() || this.isMatchFinished()) return false;
     return this.selectedFrom() !== null && this.legalTargets().has(OFF_POINT);
   }
 
   roll(): void {
-    if (this.previewView()) return;
+    if (this.previewView() || this.isMatchFinished()) return;
     console.info('[dice:click]');
     if (!this.canRoll()) return;
     if (this.rollLock) return;
@@ -308,7 +462,7 @@ export class NardiBoardComponent {
   }
 
   canRoll(): boolean {
-    if (this.previewView()) return false;
+    if (this.previewView() || this.isMatchFinished()) return false;
     if (this.rollLock) return false;
     const v = this.view();
     if (!v) return false;
@@ -347,6 +501,7 @@ export class NardiBoardComponent {
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
+    if (this.resultOpen()) return;
     if (this.expanded()) {
       void this.exitExpanded(true);
     }
